@@ -1,0 +1,16 @@
+name: ddr_ring_fixed_baseline
+description: "S1b MIG-stall sweep — baseline (mem=DEADBEEF, no ifdef overrides)"
+sources:
+  - sim/tb/tb_ddr_ring_fixed.v
+  - rtl/la_ddr_writer.v
+  - rtl/la_ddr_ring_streamer.v
+  - rtl/ddr3/ddr3_wr_ctrl.v
+  - rtl/ddr3/ddr3_rd_ctrl.v
+  - rtl/ddr3/ddr3_arbit.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_adapter.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo_adapter.v
+expect:
+  contains: "RESULT=ALL_PASS"
+tags: [ring, mig-stall]
+timeout_s: 120

@@ -1,0 +1,17 @@
+name: ddr_ring_fixed_mem_11
+description: "S1b MIG-stall + mem init 0x11 (r38 H7 corroboration probe)"
+sources:
+  - sim/tb/tb_ddr_ring_fixed.v
+  - rtl/la_ddr_writer.v
+  - rtl/la_ddr_ring_streamer.v
+  - rtl/ddr3/ddr3_wr_ctrl.v
+  - rtl/ddr3/ddr3_rd_ctrl.v
+  - rtl/ddr3/ddr3_arbit.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_adapter.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo_adapter.v
+defines: [SIM_MEM_INIT_11]
+expect:
+  contains: "RESULT=ALL_PASS"
+tags: [ring, mig-stall]
+timeout_s: 120

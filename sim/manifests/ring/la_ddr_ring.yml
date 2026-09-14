@@ -1,0 +1,19 @@
+name: la_ddr_ring
+description: "doc 19 P0e/P1/P2/P3 — writer + streamer + NACK on shared ring"
+sources:
+  - sim/tb/tb_la_ddr_ring.v
+  - rtl/la_ddr_writer.v
+  - rtl/la_ddr_ring_streamer.v
+  - rtl/ddr3/ddr3_wr_ctrl.v
+  - rtl/ddr3/ddr3_rd_ctrl.v
+  - rtl/ddr3/ddr3_arbit.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo.v
+  # la_ddr_writer now packs+CDCs via the standard adapter (needs axis_adapter)
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_adapter.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo_adapter.v
+expect:
+  # ALL_PASS only prints when every subtest passes, including TEST F which
+  # gates the -1024 burst-reorder fix (ping-pong wbuf, doc 30).
+  contains: "RESULT=ALL_PASS"
+tags: [ring, nack]
+timeout_s: 240

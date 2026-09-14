@@ -1,0 +1,17 @@
+name: ddr_ring_fixed_mem_ff
+description: "S1b MIG-stall + mem init 0xFF (r37 §1.3 cross-alignment)"
+sources:
+  - sim/tb/tb_ddr_ring_fixed.v
+  - rtl/la_ddr_writer.v
+  - rtl/la_ddr_ring_streamer.v
+  - rtl/ddr3/ddr3_wr_ctrl.v
+  - rtl/ddr3/ddr3_rd_ctrl.v
+  - rtl/ddr3/ddr3_arbit.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_adapter.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo_adapter.v
+defines: [SIM_MEM_INIT_FF]
+expect:
+  contains: "RESULT=ALL_PASS"
+tags: [ring, mig-stall]
+timeout_s: 120

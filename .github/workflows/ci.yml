@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+jobs:
+  sim:
+    # Icarus Verilog testbench regression via the manifest framework.
+    # Adding a new tb = one YAML manifest under sim/manifests/, no CI edit.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: sudo apt-get update && sudo apt-get install -y iverilog python3-yaml
+      - name: Run Verilog regression
+        run: python3 sim/run_verilog_tests.py --coverage --junit sim-results.xml
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-junit
+          path: sim-results.xml
+          if-no-files-found: ignore
+
+  host-decode:
+    # Python unit tests for the deframe front-end (etm35lib decode + timebase).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'pytest>=8.3.5' numpy
+      - name: Run host decode tests
+        run: cd host/decode && python3 -m pytest -v test_etm35lib.py test_etm35_golden.py test_fpga_timebase.py

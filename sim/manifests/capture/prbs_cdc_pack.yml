@@ -1,0 +1,14 @@
+name: prbs_cdc_pack
+description: "framed PRBS through trace_clk->ref CDC FIFO + 16B packer: drained bytes byte-exact (lane-skew regression, doc 30)"
+sources:
+  - sim/tb/tb_prbs_cdc.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo.v
+# FIX_LATCH selects the corrected pack-completion timing (latch the full word on
+# the completing cycle). Without it the tb reproduces the every-16th-byte
+# 2-word-stale lane skew (RESULT=FAIL) — the bug the shipping RTL fixes by
+# packing through axis_async_fifo_adapter instead.
+defines: [FIX_LATCH=1]
+expect:
+  contains: "RESULT=ALL_PASS"
+tags: [capture]
+timeout_s: 60

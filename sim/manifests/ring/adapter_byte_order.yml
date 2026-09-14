@@ -1,0 +1,11 @@
+name: adapter_byte_order
+description: "axis_async_fifo_adapter 8->128 is little-endian (first byte -> LS lane); la_ddr_writer relies on this to byte-reverse to big-endian"
+sources:
+  - sim/tb/tb_adapter_order.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo_adapter.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_async_fifo.v
+  - rtl/external/verilog-ethernet/lib/axis/rtl/axis_adapter.v
+expect:
+  contains: "RESULT=ALL_PASS"
+tags: [ring]
+timeout_s: 60
