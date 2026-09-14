@@ -17,6 +17,7 @@ deleted one at a time (constant footprint). Runs for --minutes.
 
 Usage: e2e_soak.py --minutes 5 [--seg-seconds 15] [--elf ...] [--iface] [--ip]
 """
+
 import argparse
 import os
 import re
@@ -31,8 +32,8 @@ DECODE = os.path.join(HERE, "..", "decode")
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 WORKSPACE = os.path.abspath(os.path.join(REPO, ".."))
 CORTRACE = os.environ.get(
-    "CORTRACE_DECODE",
-    os.path.join(WORKSPACE, "cortrace", "build", "cortrace-decode"))
+    "CORTRACE_DECODE", os.path.join(WORKSPACE, "cortrace", "build", "cortrace-decode")
+)
 
 
 def async_bad_rate(etm_path):
@@ -54,19 +55,28 @@ def async_bad_rate(etm_path):
 
 def decode_segment(raw, etm, mem, base, syms):
     # deframe
-    r = subprocess.run([sys.executable, os.path.join(DECODE, "deframe_to_etm.py"),
-                        raw, etm, "40000000"],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [
+            sys.executable,
+            os.path.join(DECODE, "deframe_to_etm.py"),
+            raw,
+            etm,
+            "40000000",
+        ],
+        capture_output=True,
+        text=True,
+    )
     if r.returncode != 0:
         return dict(ok=False, why="deframe failed: " + r.stderr[-200:])
     bad, tot = async_bad_rate(etm)
     # cortrace decode
-    c = subprocess.run([CORTRACE, etm, mem, base, syms],
-                       capture_output=True, text=True)
+    c = subprocess.run([CORTRACE, etm, mem, base, syms], capture_output=True, text=True)
     out = c.stderr + c.stdout
+
     def num(pat):
         m = re.search(pat, out)
         return int(m.group(1)) if m else None
+
     fatal = "stopped: fatal" in out or "opencsd fatal" in out
     begins = num(r"begins / ends\s*:\s*(\d+)")
     ends = num(r"begins / ends\s*:\s*\d+\s*/\s*(\d+)")
@@ -74,11 +84,20 @@ def decode_segment(raw, etm, mem, base, syms):
     mism = num(r"mismatched returns\s*:\s*(\d+)")
     exc = num(r"exceptions rendered\s*:\s*(\d+)")
     proc = num(r"etm bytes processed\s*:\s*(\d+)")
-    balanced = (begins is not None and begins == ends)
-    ok = (not fatal and balanced and dropped == 0 and bad == 0)
-    return dict(ok=ok, fatal=fatal, balanced=balanced, begins=begins,
-                dropped=dropped, mism=mism, exc=exc, proc=proc,
-                async_bad=bad, async_tot=tot)
+    balanced = begins is not None and begins == ends
+    ok = not fatal and balanced and dropped == 0 and bad == 0
+    return dict(
+        ok=ok,
+        fatal=fatal,
+        balanced=balanced,
+        begins=begins,
+        dropped=dropped,
+        mism=mism,
+        exc=exc,
+        proc=proc,
+        async_bad=bad,
+        async_tot=tot,
+    )
 
 
 def main():
@@ -93,13 +112,34 @@ def main():
 
     # build mem.bin + syms.nm from the ELF once
     elf = a.elf or os.path.join(
-        WORKSPACE, "stm32h743-etm-trace-firmware", "build", "H743_Blink.elf")
+        WORKSPACE, "stm32h743-etm-trace-firmware", "build", "H743_Blink.elf"
+    )
     mem = "/tmp/e2e_mem.bin"
     syms = "/tmp/e2e_syms.nm"
-    subprocess.run(["arm-none-eabi-objcopy", "-O", "binary",
-                    "-j", ".isr_vector", "-j", ".text", "-j", ".rodata",
-                    "-j", ".ARM", "-j", ".init_array", "-j", ".fini_array",
-                    "-j", ".data", elf, mem], check=True)
+    subprocess.run(
+        [
+            "arm-none-eabi-objcopy",
+            "-O",
+            "binary",
+            "-j",
+            ".isr_vector",
+            "-j",
+            ".text",
+            "-j",
+            ".rodata",
+            "-j",
+            ".ARM",
+            "-j",
+            ".init_array",
+            "-j",
+            ".fini_array",
+            "-j",
+            ".data",
+            elf,
+            mem,
+        ],
+        check=True,
+    )
     with open(syms, "w") as f:
         subprocess.run(["arm-none-eabi-nm", "-n", elf], stdout=f, check=True)
     print(f"ELF={elf}  mem={os.path.getsize(mem)}B")
@@ -114,22 +154,29 @@ def main():
     rc = 0
     while time.time() < t_end:
         seg += 1
-        g = subprocess.run([grab, a.iface, str(a.seg_seconds), a.tmp, "256", "512"],
-                           capture_output=True, text=True)
-        grab_ok = ("seq-gap events=0" in g.stdout
-                   and "ring-full dropped bytes=0" in g.stdout)
+        g = subprocess.run(
+            [grab, a.iface, str(a.seg_seconds), a.tmp, "256", "512"],
+            capture_output=True,
+            text=True,
+        )
+        grab_ok = (
+            "seq-gap events=0" in g.stdout and "ring-full dropped bytes=0" in g.stdout
+        )
         res = decode_segment(a.tmp, etm, mem, "08000000", syms)
         el = time.time() - t0
         if not res.get("balanced") is None:
             tot_proc += res.get("proc") or 0
             tot_begins += res.get("begins") or 0
             tot_exc += res.get("exc") or 0
-        print(f"[{el:6.1f}s] seg{seg:03d} proc={res.get('proc')} "
-              f"bal={res.get('balanced')} drop={res.get('dropped')} "
-              f"mism={res.get('mism')} exc={res.get('exc')} "
-              f"async_bad={res.get('async_bad')}/{res.get('async_tot')} "
-              f"grab={'ok' if grab_ok else 'GAP'} -> "
-              f"{'OK' if (res['ok'] and grab_ok) else 'FAIL'}", flush=True)
+        print(
+            f"[{el:6.1f}s] seg{seg:03d} proc={res.get('proc')} "
+            f"bal={res.get('balanced')} drop={res.get('dropped')} "
+            f"mism={res.get('mism')} exc={res.get('exc')} "
+            f"async_bad={res.get('async_bad')}/{res.get('async_tot')} "
+            f"grab={'ok' if grab_ok else 'GAP'} -> "
+            f"{'OK' if (res['ok'] and grab_ok) else 'FAIL'}",
+            flush=True,
+        )
         if not (res["ok"] and grab_ok):
             print(f"!! FAIL seg{seg}: {res}", flush=True)
             os.rename(a.tmp, a.tmp + f".bad_seg{seg}")
@@ -143,8 +190,14 @@ def main():
     print(f"  ETM decoded     : {tot_proc/1e6:.1f} MB (0 fatal)")
     print(f"  slice begins    : {tot_begins}")
     print(f"  exceptions      : {tot_exc}")
-    print("  VERDICT: " + ("PASS — every segment fully decoded, balanced, "
-          "0 dropped, 0 bad A-sync" if rc == 0 else "FAIL"))
+    print(
+        "  VERDICT: "
+        + (
+            "PASS — every segment fully decoded, balanced, " "0 dropped, 0 bad A-sync"
+            if rc == 0
+            else "FAIL"
+        )
+    )
     return rc
 
 

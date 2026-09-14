@@ -14,6 +14,7 @@ segment kept for post-mortem.
 Usage:
   sudo python3 prbs_soak.py --minutes 5 [--seg-seconds 10] [--iface ...] [--ip ...]
 """
+
 import argparse
 import os
 import struct
@@ -55,7 +56,7 @@ def verify_segment(path, block, ref, skip_bytes):
             bad += 1
             bad_pos.append(marks[k])
             continue
-        pl = d[marks[k] + len(MK):marks[k + 1]]
+        pl = d[marks[k] + len(MK) : marks[k + 1]]
         e = sum(1 for x in range(min(len(pl), len(refpl))) if pl[x] != refpl[x])
         blocks += 1
         if e:
@@ -80,8 +81,11 @@ def main():
     ref = block * 3
 
     # enable PRBS source
-    subprocess.run([sys.executable, trace_ctrl, "--ip", a.ip, "iddr-prbs", "1"],
-                   check=False, stdout=subprocess.DEVNULL)
+    subprocess.run(
+        [sys.executable, trace_ctrl, "--ip", a.ip, "iddr-prbs", "1"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+    )
     time.sleep(0.3)
 
     t_end = time.time() + a.minutes * 60
@@ -96,9 +100,13 @@ def main():
             seg += 1
             g = subprocess.run(
                 [grab, a.iface, str(a.seg_seconds), a.tmp, "256", "512"],
-                capture_output=True, text=True)
-            grab_ok = ("seq-gap events=0" in g.stdout
-                       and "ring-full dropped bytes=0" in g.stdout)
+                capture_output=True,
+                text=True,
+            )
+            grab_ok = (
+                "seq-gap events=0" in g.stdout
+                and "ring-full dropped bytes=0" in g.stdout
+            )
             if not grab_ok:
                 tot_grab_gaps += 1
             # skip the PRBS-enable transient at the very start of segment 1
@@ -110,20 +118,29 @@ def main():
             tot_byte_errs += berr
             tot_bytes += sz
             el = time.time() - t0
-            print(f"[{el:6.1f}s] seg{seg:03d} blocks={blocks} bad={bad} "
-                  f"byte_errs={berr} grab={'ok' if grab_ok else 'GAP/DROP'} "
-                  f"cum: blocks={tot_blocks} bad={tot_bad} "
-                  f"GB={tot_bytes/1e9:.2f}", flush=True)
+            print(
+                f"[{el:6.1f}s] seg{seg:03d} blocks={blocks} bad={bad} "
+                f"byte_errs={berr} grab={'ok' if grab_ok else 'GAP/DROP'} "
+                f"cum: blocks={tot_blocks} bad={tot_bad} "
+                f"GB={tot_bytes/1e9:.2f}",
+                flush=True,
+            )
             if bad or not grab_ok:
-                print(f"!! FAIL in seg{seg} (bad_blocks={bad} at {bpos[:6]}, "
-                      f"grab_ok={grab_ok}) -- keeping segment", flush=True)
+                print(
+                    f"!! FAIL in seg{seg} (bad_blocks={bad} at {bpos[:6]}, "
+                    f"grab_ok={grab_ok}) -- keeping segment",
+                    flush=True,
+                )
                 os.rename(a.tmp, a.tmp + f".bad_seg{seg}")
                 rc = 1
                 break
             os.remove(a.tmp)
     finally:
-        subprocess.run([sys.executable, trace_ctrl, "--ip", a.ip, "iddr-prbs", "0"],
-                       check=False, stdout=subprocess.DEVNULL)
+        subprocess.run(
+            [sys.executable, trace_ctrl, "--ip", a.ip, "iddr-prbs", "0"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+        )
 
     dur = time.time() - t0
     print("\n==== PRBS SOAK SUMMARY ====")

@@ -12,6 +12,7 @@ before and after so the two numbers can be reconciled.
 Usage:
   python3 stream_recv.py [--port 5555] [--out /tmp/stream.bin] [--seconds 3]
 """
+
 import argparse
 import socket
 import struct
@@ -38,10 +39,11 @@ def read_lost_cnt(ip, depth, port=5001, retries=8, timeout=1.0, iface=None):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     if iface:
         try:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE,
-                         (iface + "\0").encode())
+            s.setsockopt(
+                socket.SOL_SOCKET, socket.SO_BINDTODEVICE, (iface + "\0").encode()
+            )
         except PermissionError:
-            pass                          # non-root: fall back to kernel routing
+            pass  # non-root: fall back to kernel routing
     s.settimeout(timeout)
     payload = struct.pack("<H", depth + 34) + bytes(8)
     for _ in range(retries):
@@ -58,21 +60,38 @@ def read_lost_cnt(ip, depth, port=5001, retries=8, timeout=1.0, iface=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", type=int, default=5555,
-                    help="UDP port the FPGA streams to (STREAM_DEST_PORT)")
+    ap.add_argument(
+        "--port",
+        type=int,
+        default=5555,
+        help="UDP port the FPGA streams to (STREAM_DEST_PORT)",
+    )
     ap.add_argument("--bind", default="0.0.0.0")
     ap.add_argument("--out", default="/tmp/stream.bin")
     ap.add_argument("--seconds", type=float, default=3.0)
-    ap.add_argument("--ip", default=None,
-                    help="FPGA IP for polling status (default: auto-discover, "
-                         "fallback 192.168.10.42)")
-    ap.add_argument("--iface", default=None,
-                    help="bind status poll to this interface "
-                         "(default: auto-discover the wired NIC)")
-    ap.add_argument("--no-discover", action="store_true",
-                    help="skip ARP discovery, use --ip / kernel routing as-is")
-    ap.add_argument("--depth", type=int, default=61440,
-                    help="DEPTH parameter (for lost_cnt readback offset)")
+    ap.add_argument(
+        "--ip",
+        default=None,
+        help="FPGA IP for polling status (default: auto-discover, "
+        "fallback 192.168.10.42)",
+    )
+    ap.add_argument(
+        "--iface",
+        default=None,
+        help="bind status poll to this interface "
+        "(default: auto-discover the wired NIC)",
+    )
+    ap.add_argument(
+        "--no-discover",
+        action="store_true",
+        help="skip ARP discovery, use --ip / kernel routing as-is",
+    )
+    ap.add_argument(
+        "--depth",
+        type=int,
+        default=61440,
+        help="DEPTH parameter (for lost_cnt readback offset)",
+    )
     a = ap.parse_args()
 
     # Locate the FPGA: whichever NIC's ARP probe answers is the wired one. This
@@ -86,8 +105,11 @@ def main():
             info = fpga_net.discover_fpga(ip=a.ip or fpga_net.DEFAULT_FPGA_IP)
         except PermissionError:
             info = None
-            print("[stream_recv] note: run under sudo to auto-bind the status "
-                  "poll to the direct-attach NIC", file=sys.stderr)
+            print(
+                "[stream_recv] note: run under sudo to auto-bind the status "
+                "poll to the direct-attach NIC",
+                file=sys.stderr,
+            )
         if info:
             ip = ip or info["ip"]
             iface = iface or info["iface"]
@@ -105,8 +127,11 @@ def main():
     s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
     actual = s.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
     if actual < 32 * 1024 * 1024:
-        print(f"[stream_recv] warning: kernel capped SO_RCVBUF to {actual/1e6:.1f} MB "
-              f"(net.core.rmem_max is low; expect seq-gaps)", file=sys.stderr)
+        print(
+            f"[stream_recv] warning: kernel capped SO_RCVBUF to {actual/1e6:.1f} MB "
+            f"(net.core.rmem_max is low; expect seq-gaps)",
+            file=sys.stderr,
+        )
     s.bind((a.bind, a.port))
     s.settimeout(0.5)
 
@@ -146,7 +171,7 @@ def main():
         npkt += 1
         nbytes += len(payload)
     s.close()
-    elapsed = time.time() - t0        # measure BEFORE the (slow) status poll
+    elapsed = time.time() - t0  # measure BEFORE the (slow) status poll
 
     lost_after = read_lost_cnt(ip, a.depth, iface=iface)
     lost_delta = None
@@ -154,8 +179,10 @@ def main():
         lost_delta = (lost_after - lost_before) & 0xFFFFFFFF
 
     open(a.out, "wb").write(trace)
-    print(f"packets={npkt}  bytes={nbytes} ({nbytes/1e6:.2f} MB) "
-          f"in {elapsed:.2f}s  -> {nbytes/elapsed/1e6:.2f} MB/s")
+    print(
+        f"packets={npkt}  bytes={nbytes} ({nbytes/1e6:.2f} MB) "
+        f"in {elapsed:.2f}s  -> {nbytes/elapsed/1e6:.2f} MB/s"
+    )
     print(f"seq-gap lost frames: {gaps}")
     if lost_delta is not None:
         print(f"capture-side lost bytes (clk200 FIFO overrun): {lost_delta}")

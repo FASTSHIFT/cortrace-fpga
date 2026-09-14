@@ -21,6 +21,7 @@ So instead of trusting fixed settings, we try all 4 combinations
 edge, where the data is stable), score each by how many valid flash-range
 Normal I-sync anchors it yields (etm35lib), and emit the winner.
 """
+
 import sys
 import zipfile
 import collections
@@ -44,8 +45,10 @@ def load_channels(path):
     srate = cp["header"]["samplerate"]
     chans = {}
     for ch in range(nprobes):
-        blocks = sorted([n for n in names if n.startswith(f"L-{ch}/")],
-                        key=lambda s: int(s.split("/")[1]))
+        blocks = sorted(
+            [n for n in names if n.startswith(f"L-{ch}/")],
+            key=lambda s: int(s.split("/")[1]),
+        )
         raw = b"".join(z.read(b) for b in blocks)
         chans[ch] = raw
     return chans, srate, nprobes
@@ -66,8 +69,7 @@ def find_edges(clk, nsamp):
         if clk[i] != clk[i - 1]:
             edges.append(i)
     if len(edges) > 2:
-        intervals = sorted(edges[k + 1] - edges[k]
-                           for k in range(len(edges) - 1))
+        intervals = sorted(edges[k + 1] - edges[k] for k in range(len(edges) - 1))
         half = intervals[len(intervals) // 2]
     else:
         half = 1
@@ -83,14 +85,14 @@ def sample_nibbles(d, edges, eye):
         s = e + eye
         if s >= n:
             s = n - 1
-        out[k] = (d[0][s] | (d[1][s] << 1) | (d[2][s] << 2) | (d[3][s] << 3))
+        out[k] = d[0][s] | (d[1][s] << 1) | (d[2][s] << 2) | (d[3][s] << 3)
     return out
 
 
 def assemble(nibs, parity, order):
     """Assemble bytes from the nibble stream.
-      parity: 0 -> pair edges (0,1)(2,3)...; 1 -> drop the first edge then pair.
-      order:  0 -> first-of-pair = low nibble; 1 -> first-of-pair = high nibble.
+    parity: 0 -> pair edges (0,1)(2,3)...; 1 -> drop the first edge then pair.
+    order:  0 -> first-of-pair = low nibble; 1 -> first-of-pair = high nibble.
     """
     seq = nibs[parity:]
     b = bytearray()
@@ -124,8 +126,10 @@ def main():
 
     edges, half = find_edges(clk, nsamp)
     eye = max(1, int(half * DEFAULT_EYE_FRACTION))
-    print(f"TRACECLK edges={len(edges)}  median half-period={half} samp "
-          f"({half*20} ns, ~{50e6/(2*half)/1e3:.0f} kHz)  mid-eye sample @+{eye}")
+    print(
+        f"TRACECLK edges={len(edges)}  median half-period={half} samp "
+        f"({half*20} ns, ~{50e6/(2*half)/1e3:.0f} kHz)  mid-eye sample @+{eye}"
+    )
 
     nibs = sample_nibbles(d, edges, eye)
 
@@ -137,18 +141,21 @@ def main():
             data = assemble(nibs, parity, order)
             flash, total, _ = score(data)
             lbl = f"parity={parity} order={'low' if order == 0 else 'high'}"
-            print(f"  {lbl:28s} bytes={len(data)} "
-                  f"I-sync={total} flash-anchors={flash}")
+            print(
+                f"  {lbl:28s} bytes={len(data)} "
+                f"I-sync={total} flash-anchors={flash}"
+            )
             if best is None or flash > best[0]:
                 best = (flash, parity, order, data)
 
     flash, parity, order, data = best
     olbl = "rise=low,fall=high" if order == 0 else "rise=high,fall=low"
-    print(f"\n==> chosen: parity={parity} {olbl}  "
-          f"({flash} flash I-sync anchors)")
+    print(f"\n==> chosen: parity={parity} {olbl}  " f"({flash} flash I-sync anchors)")
     if flash == 0:
-        print("!! WARNING: no valid flash I-sync anchors in ANY alignment. "
-              "Check wiring / capture / that ETM is actually emitting.")
+        print(
+            "!! WARNING: no valid flash I-sync anchors in ANY alignment. "
+            "Check wiring / capture / that ETM is actually emitting."
+        )
 
     # If the TPIU formatter is active (HSYNC/FSYNC fillers present), deframe the
     # 16-byte CoreSight frames properly: skip sync fillers without consuming a
@@ -161,16 +168,20 @@ def main():
         phase, ph_flash = L.find_tpiu_phase(data)
         deframed = L.tpiu_deframe_hsync(data, phase)
         fl2, tot2, _ = score(deframed)
-        print(f"TPIU formatter detected: deframed 16-byte frames "
-              f"(phase={phase}); {len(data)} -> {len(deframed)} bytes; "
-              f"flash anchors {flash} -> {fl2}")
+        print(
+            f"TPIU formatter detected: deframed 16-byte frames "
+            f"(phase={phase}); {len(data)} -> {len(deframed)} bytes; "
+            f"flash anchors {flash} -> {fl2}"
+        )
         data = deframed
 
     # Report the recovered anchors.
     _, _, syncs = score(data)
     hist = collections.Counter(s.addr for s in syncs if L.is_flash(s.addr))
-    print(f"A-sync={len(L.find_asyncs(data))}  "
-          f"flash I-sync anchors={sum(hist.values())}")
+    print(
+        f"A-sync={len(L.find_asyncs(data))}  "
+        f"flash I-sync anchors={sum(hist.values())}"
+    )
     print("top anchor PCs:")
     for a, n in hist.most_common(10):
         print(f"   0x{a:08x} : {n}")

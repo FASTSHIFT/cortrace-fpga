@@ -21,6 +21,7 @@ IHI0014Q facts used:
     reason code, bit4 Jazelle, bit3 NonSecure, bit2 AltISA; the 4-byte address
     is uncompressed and address bit0 is the Thumb bit.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -41,10 +42,10 @@ REASON_DEBUG_EXIT = 0b11
 
 @dataclass(frozen=True)
 class ISync:
-    offset: int        # byte offset of the 0x08 header in the stream
-    addr: int          # absolute instruction address (thumb bit stripped)
-    thumb: bool        # address bit0 (Thumb state)
-    reason: int        # info-byte reason code [6:5]
+    offset: int  # byte offset of the 0x08 header in the stream
+    addr: int  # absolute instruction address (thumb bit stripped)
+    thumb: bool  # address bit0 (Thumb state)
+    reason: int  # info-byte reason code [6:5]
     nonsecure: bool
 
 
@@ -72,8 +73,9 @@ def find_asyncs(data: bytes, min_zeros: int = 5) -> list[int]:
     return out
 
 
-def parse_isync_at(data: bytes, i: int,
-                   flash_lo: int = FLASH_LO, flash_hi: int = FLASH_HI) -> "ISync | None":
+def parse_isync_at(
+    data: bytes, i: int, flash_lo: int = FLASH_LO, flash_hi: int = FLASH_HI
+) -> "ISync | None":
     """Try to parse a Normal I-sync packet whose header is at offset i.
 
     Returns an ISync if the 6 bytes form a Normal I-sync with a flash address,
@@ -92,13 +94,12 @@ def parse_isync_at(data: bytes, i: int,
     if data[i] != ISYNC_HEADER:
         return None
     info = data[i + 1]
-    if info & 0x80:          # bit7=1 => LSiP, not a Normal I-sync
+    if info & 0x80:  # bit7=1 => LSiP, not a Normal I-sync
         return None
-    if info & 0x14:          # bit4 Jazelle or bit2 AltISA set => not Cortex-M
+    if info & 0x14:  # bit4 Jazelle or bit2 AltISA set => not Cortex-M
         return None
-    addr = (data[i + 2] | (data[i + 3] << 8)
-            | (data[i + 4] << 16) | (data[i + 5] << 24))
-    a = addr & ~1            # strip Thumb bit -> half-word aligned PC
+    addr = data[i + 2] | (data[i + 3] << 8) | (data[i + 4] << 16) | (data[i + 5] << 24)
+    a = addr & ~1  # strip Thumb bit -> half-word aligned PC
     if not (flash_lo <= a < flash_hi):
         return None
     return ISync(
@@ -110,8 +111,9 @@ def parse_isync_at(data: bytes, i: int,
     )
 
 
-def find_isyncs(data: bytes,
-                flash_lo: int = FLASH_LO, flash_hi: int = FLASH_HI) -> "list[ISync]":
+def find_isyncs(
+    data: bytes, flash_lo: int = FLASH_LO, flash_hi: int = FLASH_HI
+) -> "list[ISync]":
     """Scan the whole stream for Normal I-sync packets carrying a flash PC.
 
     This is the robust anchor extractor: every Normal I-sync gives an absolute
@@ -128,8 +130,9 @@ def find_isyncs(data: bytes,
     return out
 
 
-def recover_pcs(data: bytes,
-                flash_lo: int = FLASH_LO, flash_hi: int = FLASH_HI) -> "list[int]":
+def recover_pcs(
+    data: bytes, flash_lo: int = FLASH_LO, flash_hi: int = FLASH_HI
+) -> "list[int]":
     """Return the sorted distinct flash PCs anchored from I-sync packets."""
     return sorted({s.addr for s in find_isyncs(data, flash_lo, flash_hi)})
 
@@ -198,17 +201,17 @@ def traceif_assemble(nibble_bytes: bytes) -> bytes:
 # ----------------------------------------------------------------------------
 @dataclass
 class FlowEvent:
-    kind: str          # 'isync' | 'atoms' | 'branch'
-    addr: int          # 'isync': absolute PC (ground truth). 'atoms': the
-                       # current base PC (carried, not advanced). 'branch':
-                       # the base PC at the branch — NOT the branch TARGET.
-                       # Branch target-address decode is not implemented
-                       # (review r14 BUG-3); branch events are COUNT-ONLY and
-                       # addr is only the prevailing base, not the jump dest.
-    eatoms: int = 0    # executed atoms (P-header)
-    natoms: int = 0    # not-executed atoms
+    kind: str  # 'isync' | 'atoms' | 'branch'
+    addr: int  # 'isync': absolute PC (ground truth). 'atoms': the
+    # current base PC (carried, not advanced). 'branch':
+    # the base PC at the branch — NOT the branch TARGET.
+    # Branch target-address decode is not implemented
+    # (review r14 BUG-3); branch events are COUNT-ONLY and
+    # addr is only the prevailing base, not the jump dest.
+    eatoms: int = 0  # executed atoms (P-header)
+    natoms: int = 0  # not-executed atoms
     addr_is_target: bool = False  # True only when addr is a decoded absolute
-                                  # PC (isync). False for atoms/branch.
+    # PC (isync). False for atoms/branch.
 
 
 def _phdr_atoms(c: int):
@@ -216,11 +219,11 @@ def _phdr_atoms(c: int):
     None if not a P-header. IHI0014Q §7.3.4."""
     if (c & 0b10000001) != 0b10000000:
         return None
-    if (c & 0b10000011) == 0b10000000:        # Format-1
+    if (c & 0b10000011) == 0b10000000:  # Format-1
         eatoms = (c & 0x3C) >> 2
         natoms = 1 if (c & (1 << 6)) else 0
         return eatoms, natoms
-    if (c & 0b11110011) == 0b10000010:        # Format-2
+    if (c & 0b11110011) == 0b10000010:  # Format-2
         eatoms = ((c & (1 << 2)) == 0) + ((c & (1 << 3)) == 0)
         natoms = 2 - eatoms
         return eatoms, natoms
@@ -293,10 +296,10 @@ def decode_all(data: bytes):
 # ----------------------------------------------------------------------------
 @dataclass
 class AlignedRegion:
-    async_offset: int      # byte offset of the A-sync 0x80 terminator
-    shift: int             # bit-shift (0..7) that aligned this region
-    isync: ISync           # the I-sync that anchored it (addresses are absolute)
-    events: list           # FlowEvent list for the region (incl. the isync)
+    async_offset: int  # byte offset of the A-sync 0x80 terminator
+    shift: int  # bit-shift (0..7) that aligned this region
+    isync: ISync  # the I-sync that anchored it (addresses are absolute)
+    events: list  # FlowEvent list for the region (incl. the isync)
 
 
 def _find_isync_in_window(window: bytes, max_scan: int = 24):
@@ -321,7 +324,7 @@ def decode_aligned(data: bytes, scan: int = 24, region_bytes: int = 4096):
     """
     regions = []
     for a_off in find_asyncs(data):
-        tail = data[a_off + 1:]                 # bytes after the 0x80
+        tail = data[a_off + 1 :]  # bytes after the 0x80
         chosen = None
         for sh in range(8):
             shifted = bit_shift(tail, sh) if sh else tail
@@ -336,8 +339,9 @@ def decode_aligned(data: bytes, scan: int = 24, region_bytes: int = 4096):
         events = [FlowEvent("isync", s.addr, addr_is_target=True)]
         region, _ = decode_region(shifted, off + 6, s.addr, region_bytes)
         events.extend(region)
-        regions.append(AlignedRegion(async_offset=a_off, shift=sh,
-                                      isync=s, events=events))
+        regions.append(
+            AlignedRegion(async_offset=a_off, shift=sh, isync=s, events=events)
+        )
     return regions
 
 
@@ -367,7 +371,7 @@ def tpiu_sync_frames(stream: bytes) -> list[bytes]:
 
     Returns a list of 16-byte frames (each as bytes, payload[0]..payload[15]).
     """
-    buf = 1                      # 129-bit, init 1 (sentinel in bit0)
+    buf = 1  # 129-bit, init 1 (sentinel in bit0)
     synced = False
     frames = []
     for p in stream:
@@ -422,7 +426,7 @@ def tpiu_deframe(stream: bytes, want_stream: "int | None" = None):
     that stream's bytes (bytes()). Faithful to orbuculum _getPacket.
     """
     out: dict[int, bytearray] = {}
-    cur = 0                              # current stream id (0 = null/padding)
+    cur = 0  # current stream id (0 = null/padding)
     for frame in tpiu_sync_frames(stream):
         # tpiu_sync_frames emits frames byte-reversed wrt arrival (the amaranth
         # buf packs the first arrived byte into the high bits). Restore arrival
@@ -513,8 +517,9 @@ def has_tpiu_sync(stream: bytes) -> bool:
 # emits HSYNC but no FSYNC within a window), the caller scans all 16 candidate
 # start phases and picks the one yielding the most valid flash I-sync anchors.
 # ----------------------------------------------------------------------------
-def tpiu_deframe_hsync(stream: bytes, phase: int = 0,
-                       want_stream: "int | None" = None) -> bytes:
+def tpiu_deframe_hsync(
+    stream: bytes, phase: int = 0, want_stream: "int | None" = None
+) -> bytes:
     """Deframe a 16-byte TPIU formatter stream starting at `phase`, skipping
     HSYNC/FSYNC fillers and restoring even-byte LSBs from the aux byte. Returns
     the recovered payload (single concatenation when want_stream is None, else
@@ -529,8 +534,13 @@ def tpiu_deframe_hsync(stream: bytes, phase: int = 0,
         if stream[i] == 0xFF and i + 1 < n and stream[i + 1] == 0x7F:
             i += 2
             continue
-        if (i + 3 < n and stream[i] == 0xFF and stream[i + 1] == 0xFF
-                and stream[i + 2] == 0xFF and stream[i + 3] == 0x7F):
+        if (
+            i + 3 < n
+            and stream[i] == 0xFF
+            and stream[i + 1] == 0xFF
+            and stream[i + 2] == 0xFF
+            and stream[i + 3] == 0x7F
+        ):
             i += 4
             continue
         frame.append(stream[i])
@@ -540,7 +550,7 @@ def tpiu_deframe_hsync(stream: bytes, phase: int = 0,
             for j in range(15):
                 if j % 2 == 0:
                     if frame[j] & 1:
-                        cur = frame[j] >> 1        # stream-ID change
+                        cur = frame[j] >> 1  # stream-ID change
                     else:
                         b = frame[j] | ((aux >> (j // 2)) & 1)
                         if want_stream is None or cur == want_stream:
@@ -559,7 +569,7 @@ def _decode_frame16(frame, cur, out, want_stream):
     for j in range(15):
         if j % 2 == 0:
             if frame[j] & 1:
-                cur = frame[j] >> 1            # stream-ID change
+                cur = frame[j] >> 1  # stream-ID change
             else:
                 b = frame[j] | ((aux >> (j // 2)) & 1)
                 if want_stream is None or cur == want_stream:
@@ -578,8 +588,13 @@ def _next_frame(stream, i, n):
         if stream[i] == 0xFF and i + 1 < n and stream[i + 1] == 0x7F:
             i += 2
             continue
-        if (i + 3 < n and stream[i] == 0xFF and stream[i + 1] == 0xFF
-                and stream[i + 2] == 0xFF and stream[i + 3] == 0x7F):
+        if (
+            i + 3 < n
+            and stream[i] == 0xFF
+            and stream[i + 1] == 0xFF
+            and stream[i + 2] == 0xFF
+            and stream[i + 3] == 0x7F
+        ):
             i += 4
             continue
         frame.append(stream[i])
@@ -589,9 +604,13 @@ def _next_frame(stream, i, n):
     return None, i
 
 
-def tpiu_deframe_walk(stream: bytes, want_stream: "int | None" = None,
-                      check_frames: int = 6, bad_thresh: "float | None" = None,
-                      scan: int = 48) -> bytes:
+def tpiu_deframe_walk(
+    stream: bytes,
+    want_stream: "int | None" = None,
+    check_frames: int = 6,
+    bad_thresh: "float | None" = None,
+    scan: int = 48,
+) -> bytes:
     """Seam-free continuous TPIU deframer with in-place re-lock (doc 15 §18).
 
     Unlike tpiu_deframe_local (fixed windows -> a frame lost per seam, ~1.5%
@@ -633,7 +652,7 @@ def tpiu_deframe_walk(stream: bytes, want_stream: "int | None" = None,
         unk = sum(1 for c in tmp if _classify(c) == "unknown")
         return unk / len(tmp), i
 
-    phase, _ = find_tpiu_phase(stream[:min(n, 20000)])
+    phase, _ = find_tpiu_phase(stream[: min(n, 20000)])
 
     if bad_thresh is None:
         # Estimate the baseline unknown-fraction at the chosen phase over a
@@ -641,7 +660,7 @@ def tpiu_deframe_walk(stream: bytes, want_stream: "int | None" = None,
         # a genuinely clean stream keeps a wide (0.30) threshold and never
         # spuriously re-locks, while a drifting (no-full-sync) stream gets an
         # aggressive threshold just above its own floor.
-        probe = tpiu_deframe_hsync(stream[:min(n, 40000)], phase)
+        probe = tpiu_deframe_hsync(stream[: min(n, 40000)], phase)
         if probe:
             base = sum(1 for c in probe if _classify(c) == "unknown") / len(probe)
         else:
@@ -688,9 +707,13 @@ def tpiu_deframe_walk(stream: bytes, want_stream: "int | None" = None,
     return bytes(out)
 
 
-def tpiu_deframe_walk_offsets(stream: bytes, want_stream: "int | None" = None,
-                              check_frames: int = 6, bad_thresh: float = 0.30,
-                              scan: int = 48):
+def tpiu_deframe_walk_offsets(
+    stream: bytes,
+    want_stream: "int | None" = None,
+    check_frames: int = 6,
+    bad_thresh: float = 0.30,
+    scan: int = 48,
+):
     """Like tpiu_deframe_walk but ALSO returns, per output byte, the SOURCE
     byte offset in `stream` it was extracted from. Returns (out, offsets) where
     offsets[k] is the index into `stream` of the TPIU slot that produced out[k].
@@ -728,8 +751,13 @@ def tpiu_deframe_walk_offsets(stream: bytes, want_stream: "int | None" = None,
             if stream[i] == 0xFF and i + 1 < n and stream[i + 1] == 0x7F:
                 i += 2
                 continue
-            if (i + 3 < n and stream[i] == 0xFF and stream[i + 1] == 0xFF
-                    and stream[i + 2] == 0xFF and stream[i + 3] == 0x7F):
+            if (
+                i + 3 < n
+                and stream[i] == 0xFF
+                and stream[i + 1] == 0xFF
+                and stream[i + 2] == 0xFF
+                and stream[i + 3] == 0x7F
+            ):
                 i += 4
                 continue
             frame.append(stream[i])
@@ -759,7 +787,7 @@ def tpiu_deframe_walk_offsets(stream: bytes, want_stream: "int | None" = None,
         offs = [min(n - 1, (k * n) // max(1, len(out))) for k in range(len(out))]
         return bytes(out), offs
 
-    phase, _ = find_tpiu_phase(stream[:min(n, 20000)])
+    phase, _ = find_tpiu_phase(stream[: min(n, 20000)])
     out = bytearray()
     offs = []
     cur = 0
@@ -785,8 +813,9 @@ def tpiu_deframe_walk_offsets(stream: bytes, want_stream: "int | None" = None,
     return bytes(out), offs
 
 
-def tpiu_deframe_local(stream: bytes, window: int = 5000,
-                       want_stream: "int | None" = None) -> bytes:
+def tpiu_deframe_local(
+    stream: bytes, window: int = 5000, want_stream: "int | None" = None
+) -> bytes:
     """Deframe with PER-WINDOW local frame phase (doc 15 §16/§17).
 
     A single global TPIU phase cannot span an occasional corrupt ~1KB capture
@@ -811,7 +840,7 @@ def tpiu_deframe_local(stream: bytes, window: int = 5000,
         return tpiu_deframe_hsync(stream, ph, want_stream)
     st = 0
     while st < n:
-        seg = stream[st:st + window]
+        seg = stream[st : st + window]
         if len(seg) < 32:
             break
         ph, _ = find_tpiu_phase(seg)
@@ -834,7 +863,6 @@ def find_tpiu_phase(stream: bytes, scorer=None) -> "tuple[int, int]":
         if score > best[1]:
             best = (ph, score)
     return best
-
 
 
 # ----------------------------------------------------------------------------
@@ -899,13 +927,14 @@ def _classifiable_run(data: bytes, start: int, n: int = 6) -> int:
     return good
 
 
-def decode_region_realign(data: bytes, start: int, base_addr: int,
-                          max_bytes: int = 4096, min_run: int = 3):
+def decode_region_realign(
+    data: bytes, start: int, base_addr: int, max_bytes: int = 4096, min_run: int = 3
+):
     """Like decode_region, but on hitting an 'unknown' byte, try bit-shifts to
     realign and continue. Returns (events, consumed_bytes, realign_count)."""
     events = []
     realigns = 0
-    work = data[start:start + max_bytes]
+    work = data[start : start + max_bytes]
     i = 0
     base = base_addr
     while i < len(work):
@@ -934,7 +963,7 @@ def decode_region_realign(data: bytes, start: int, base_addr: int,
             # malformed isync -> treat as derail below
             k = "unknown"
         if k == "async":
-            break          # next A-sync; caller re-anchors
+            break  # next A-sync; caller re-anchors
         if k in ("trigger", "vmid", "ignore", "contextid", "exc_exit", "exc_entry"):
             i += 1
             continue
@@ -1002,6 +1031,7 @@ def decode_all_realign(data: bytes):
 # Address packet for its target; any other instruction advances by its width.
 # ----------------------------------------------------------------------------
 
+
 def expand_pheader(c: int) -> "list[str] | None":
     """Expand a non-cycle-accurate P-header byte into an ordered atom list.
 
@@ -1013,11 +1043,11 @@ def expand_pheader(c: int) -> "list[str] | None":
       * Format-2 (b1000FF10): bit3 = first instruction, bit2 = second;
         a 0 bit = E (passed), 1 bit = N (failed) (e.g. 0x8A -> NE).
     """
-    if (c & 0b10000011) == 0b10000000:          # Format-1
+    if (c & 0b10000011) == 0b10000000:  # Format-1
         eatoms = (c & 0x3C) >> 2
         natoms = 1 if (c & (1 << 6)) else 0
         return ["E"] * eatoms + ["N"] * natoms
-    if (c & 0b11110011) == 0b10000010:          # Format-2
+    if (c & 0b11110011) == 0b10000010:  # Format-2
         first = "E" if not (c & (1 << 3)) else "N"
         second = "E" if not (c & (1 << 2)) else "N"
         return [first, second]
@@ -1046,7 +1076,7 @@ def decode_branch_thumb(data: bytes, i: int, prev_addr: int):
         return None
     addr = prev_addr & 0xFFFFFFFF
     c = data[i]
-    addr = (addr & ~0x7F) | (c & 0x7E)          # Address[6:1]
+    addr = (addr & ~0x7F) | (c & 0x7E)  # Address[6:1]
     n = 1
     cont = bool(c & 0x80)
     while cont and n < 5:
@@ -1054,11 +1084,11 @@ def decode_branch_thumb(data: bytes, i: int, prev_addr: int):
             return None
         c = data[i + n]
         if n < 4:
-            start = 7 * n                        # 7,14,21
+            start = 7 * n  # 7,14,21
             addr = (addr & ~(0x7F << start)) | ((c & 0x7F) << start)
             cont = bool(c & 0x80)
-        else:                                    # byte 5: Address[31:28]
+        else:  # byte 5: Address[31:28]
             addr = (addr & ~(0xF << 28)) | ((c & 0xF) << 28)
-            cont = bool(c & 0x40)                # exception info follows
+            cont = bool(c & 0x40)  # exception info follows
         n += 1
-    return addr & 0xFFFFFFFE, n                  # strip Thumb bit
+    return addr & 0xFFFFFFFE, n  # strip Thumb bit

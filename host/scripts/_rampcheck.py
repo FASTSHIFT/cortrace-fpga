@@ -2,6 +2,7 @@
 """Byte-level integrity check for the FPGA ramp stress capture: every byte must
 be (prev+1) mod 256. Zero breaks => hardware delivered the predictable stream
 with zero byte errors."""
+
 import sys
 
 import numpy as np

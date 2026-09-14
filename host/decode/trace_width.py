@@ -57,8 +57,8 @@ def half_symbols(raw, width):
     mask = (1 << width) - 1
     out = []
     for byte in raw:
-        out.append(byte & mask)          # trace_a: rising edge (low nibble)
-        out.append((byte >> 4) & mask)   # trace_b: falling edge (high nibble)
+        out.append(byte & mask)  # trace_a: rising edge (low nibble)
+        out.append((byte >> 4) & mask)  # trace_b: falling edge (high nibble)
     return out
 
 
@@ -80,7 +80,7 @@ def assemble_width(raw, width, phase=0, bit_order="lsb"):
         raise ValueError(f"width must be one of {WIDTHS}, got {width}")
 
     syms = half_symbols(raw, width)[phase:]
-    per_byte = 8 // width          # half-symbols per byte
+    per_byte = 8 // width  # half-symbols per byte
     out = bytearray()
 
     for k in range(0, len(syms) - per_byte + 1, per_byte):
@@ -106,6 +106,7 @@ def candidates(raw, width):
 
 def main():
     import sys
+
     if len(sys.argv) < 2:
         print(__doc__)
         return 2
@@ -115,8 +116,7 @@ def main():
     import etm35lib as L
     import tpiu_official as T
 
-    print(f"raw {len(raw)}B, width={width}, "
-          f"{phases(width)} phase(s) x order(s)")
+    print(f"raw {len(raw)}B, width={width}, " f"{phases(width)} phase(s) x order(s)")
     best = None
     for ph, bo, data in candidates(raw, width):
         fsync = data.count(bytes([0xFF, 0xFF, 0xFF, 0x7F]))
@@ -135,8 +135,10 @@ def main():
             else:
                 zc = 0
         score = a * 1000000 + len(etm) * 10 + fsync
-        print(f"  phase={ph} order={bo}: bytes={len(data)} fsync={fsync} "
-              f"deframed={len(etm)} A-sync={a} score={score}")
+        print(
+            f"  phase={ph} order={bo}: bytes={len(data)} fsync={fsync} "
+            f"deframed={len(etm)} A-sync={a} score={score}"
+        )
         if best is None or score > best[0]:
             best = (score, ph, bo, data)
     if best:
@@ -146,4 +148,5 @@ def main():
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

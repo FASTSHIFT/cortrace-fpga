@@ -30,6 +30,7 @@ Then:
     trc_pkt_lister -ss_dir <out_dir> -decode -logstdout
     (+ -tpiu if --coresight was used)
 """
+
 import argparse
 import os
 import re
@@ -48,28 +49,46 @@ def _lowest_load_lma(elf):
     take the min over allocatable, non-zero-LMA code/data sections."""
     try:
         out = subprocess.check_output(
-            [OBJCOPY.replace("objcopy", "objdump"), "-h", elf]).decode()
+            [OBJCOPY.replace("objcopy", "objdump"), "-h", elf]
+        ).decode()
     except Exception:
         return 0x08000000
     lmas = []
     for line in out.splitlines():
         # columns: Idx Name Size VMA LMA FileOff Algn
-        m = re.match(r"\s*\d+\s+(\S+)\s+([0-9a-f]{8})\s+([0-9a-f]{8})\s+"
-                     r"([0-9a-f]{8})", line)
+        m = re.match(
+            r"\s*\d+\s+(\S+)\s+([0-9a-f]{8})\s+([0-9a-f]{8})\s+" r"([0-9a-f]{8})", line
+        )
         if m:
-            name, size, vma, lma = m.group(1), int(m.group(2), 16), \
-                int(m.group(3), 16), int(m.group(4), 16)
-            if name in (".isr_vector", ".text", ".rodata", ".ARM.exidx",
-                        ".init_array", ".fini_array", "ER_IROM1") \
-                    and size > 0 and lma != 0:
+            name, size, vma, lma = (
+                m.group(1),
+                int(m.group(2), 16),
+                int(m.group(3), 16),
+                int(m.group(4), 16),
+            )
+            if (
+                name
+                in (
+                    ".isr_vector",
+                    ".text",
+                    ".rodata",
+                    ".ARM.exidx",
+                    ".init_array",
+                    ".fini_array",
+                    "ER_IROM1",
+                )
+                and size > 0
+                and lma != 0
+            ):
                 lmas.append(lma)
     return min(lmas) if lmas else 0x08000000
 
+
 # ---- ETMv3.5 (Cortex-M4) live register defaults -----------------------------
 # Live values for the STM32F429 Cortex-M4 ETM (override via env).
-ETMCR       = int(os.environ.get("ETMCR",       "0x00000980"), 0)
-ETMCCER     = int(os.environ.get("ETMCCER",     "0x18541800"), 0)
-ETMIDR      = int(os.environ.get("ETMIDR",      "0x4114f250"), 0)
+ETMCR = int(os.environ.get("ETMCR", "0x00000980"), 0)
+ETMCCER = int(os.environ.get("ETMCCER", "0x18541800"), 0)
+ETMIDR = int(os.environ.get("ETMIDR", "0x4114f250"), 0)
 ETMTRACEIDR = int(os.environ.get("ETMTRACEIDR", "0x00000002"), 0)
 
 # ---- ETMv4 (Cortex-M7) live register defaults -------------------------------
@@ -82,30 +101,33 @@ ETMTRACEIDR = int(os.environ.get("ETMTRACEIDR", "0x00000002"), 0)
 # Trace-Info), so CONFIGR must be near-zero at capture time. If you change the
 # firmware to enable TS/CID/VMID/CC, update the env var so OpenCSD parses the
 # extra fields correctly — otherwise it will mis-frame Atom/Address packets.
-TRCIDR0        = int(os.environ.get("TRCIDR0",        "0x080006E1"), 0)
-TRCIDR1        = int(os.environ.get("TRCIDR1",        "0x4100F401"), 0)
-TRCIDR2        = int(os.environ.get("TRCIDR2",        "0x00000004"), 0)
-TRCIDR8        = int(os.environ.get("TRCIDR8",        "0x00000001"), 0)
-TRCIDR9        = int(os.environ.get("TRCIDR9",        "0x00000000"), 0)
-TRCIDR10       = int(os.environ.get("TRCIDR10",       "0x00000000"), 0)
-TRCIDR11       = int(os.environ.get("TRCIDR11",       "0x00000000"), 0)
-TRCIDR12       = int(os.environ.get("TRCIDR12",       "0x00000001"), 0)
-TRCIDR13       = int(os.environ.get("TRCIDR13",       "0x00000000"), 0)
-TRCCONFIGR     = int(os.environ.get("TRCCONFIGR",     "0x00000000"), 0)
-TRCTRACEIDR_V4 = int(os.environ.get("TRCTRACEIDR",    "0x00000002"), 0)
-TRCAUTHSTATUS  = int(os.environ.get("TRCAUTHSTATUS",  "0x000000C0"), 0)
+TRCIDR0 = int(os.environ.get("TRCIDR0", "0x080006E1"), 0)
+TRCIDR1 = int(os.environ.get("TRCIDR1", "0x4100F401"), 0)
+TRCIDR2 = int(os.environ.get("TRCIDR2", "0x00000004"), 0)
+TRCIDR8 = int(os.environ.get("TRCIDR8", "0x00000001"), 0)
+TRCIDR9 = int(os.environ.get("TRCIDR9", "0x00000000"), 0)
+TRCIDR10 = int(os.environ.get("TRCIDR10", "0x00000000"), 0)
+TRCIDR11 = int(os.environ.get("TRCIDR11", "0x00000000"), 0)
+TRCIDR12 = int(os.environ.get("TRCIDR12", "0x00000001"), 0)
+TRCIDR13 = int(os.environ.get("TRCIDR13", "0x00000000"), 0)
+TRCCONFIGR = int(os.environ.get("TRCCONFIGR", "0x00000000"), 0)
+TRCTRACEIDR_V4 = int(os.environ.get("TRCTRACEIDR", "0x00000002"), 0)
+TRCAUTHSTATUS = int(os.environ.get("TRCAUTHSTATUS", "0x000000C0"), 0)
 
 
 def text_sections(elf):
     """Return [(addr, size, off)] for executable (AX) flash sections."""
-    p = subprocess.run([READELF, "-S", "-W", elf],
-                       capture_output=True, text=True)
+    p = subprocess.run([READELF, "-S", "-W", elf], capture_output=True, text=True)
     out = []
     import re
+
     for line in p.stdout.splitlines():
         # [Nr] Name Type Addr Off Size ES Flg Lk Inf Al
-        m = re.search(r"\]\s+(\S+)\s+\w+\s+([0-9a-fA-F]{8,16})\s+"
-                      r"([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+\S+\s+([A-Zp]*)", line)
+        m = re.search(
+            r"\]\s+(\S+)\s+\w+\s+([0-9a-fA-F]{8,16})\s+"
+            r"([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+\S+\s+([A-Zp]*)",
+            line,
+        )
         if not m:
             continue
         addr = int(m.group(2), 16)
@@ -122,22 +144,31 @@ def main():
     ap.add_argument("trace")
     ap.add_argument("elf")
     ap.add_argument("out_dir")
-    ap.add_argument("--protocol", choices=["etm35", "etm4"], default="etm35",
-                    help="ETM protocol (etm35=Cortex-M4, etm4=Cortex-M7)")
-    ap.add_argument("--coresight", action="store_true",
-                    help="trace still has TPIU framing (format=coresight)")
+    ap.add_argument(
+        "--protocol",
+        choices=["etm35", "etm4"],
+        default="etm35",
+        help="ETM protocol (etm35=Cortex-M4, etm4=Cortex-M7)",
+    )
+    ap.add_argument(
+        "--coresight",
+        action="store_true",
+        help="trace still has TPIU framing (format=coresight)",
+    )
     a = ap.parse_args()
 
     os.makedirs(a.out_dir, exist_ok=True)
-    is_v4 = (a.protocol == "etm4")
+    is_v4 = a.protocol == "etm4"
     # OpenCSD 1.4.1's CoreArchProfileMap only knows Cortex-M0/M0+/M3/M4/M23/M33.
     # STM32H7's Cortex-M7 is ARMv7E-M / M-profile — identical to Cortex-M4 as
     # far as the ETMv4 decoder is concerned (same ISA, same exception model);
     # advertise it as "Cortex-M4" so OpenCSD accepts the snapshot.
     core_type = "Cortex-M4" if is_v4 else "Cortex-M4"
-    desc = ("STM32H743 M7 ETMv4 capture (declared Cortex-M4 for OpenCSD)"
-            if is_v4 else
-            "STM32F429 M4 ETMv3.5 capture (logic-analyser)")
+    desc = (
+        "STM32H743 M7 ETMv4 capture (declared Cortex-M4 for OpenCSD)"
+        if is_v4
+        else "STM32F429 M4 ETMv3.5 capture (logic-analyser)"
+    )
 
     # 1) Trace buffer: copy the captured bytes in.
     trace_bytes = open(a.trace, "rb").read()
@@ -148,16 +179,25 @@ def main():
     #    fetch opcodes. Try common section names first, then fall back to
     #    the whole ELF (objcopy will strip non-loadable).
     mem_bin = os.path.join(a.out_dir, "mem.bin")
-    subprocess.run([OBJCOPY, "-O", "binary",
-                    "--only-section=.isr_vector",
-                    "--only-section=.text", "--only-section=.rodata",
-                    "--only-section=.ARM.exidx", "--only-section=.init_array",
-                    "--only-section=.fini_array",
-                    "--only-section=ER_IROM1",
-                    a.elf, mem_bin], capture_output=True)
+    subprocess.run(
+        [
+            OBJCOPY,
+            "-O",
+            "binary",
+            "--only-section=.isr_vector",
+            "--only-section=.text",
+            "--only-section=.rodata",
+            "--only-section=.ARM.exidx",
+            "--only-section=.init_array",
+            "--only-section=.fini_array",
+            "--only-section=ER_IROM1",
+            a.elf,
+            mem_bin,
+        ],
+        capture_output=True,
+    )
     if not os.path.exists(mem_bin) or os.path.getsize(mem_bin) == 0:
-        subprocess.run([OBJCOPY, "-O", "binary", a.elf, mem_bin],
-                       capture_output=True)
+        subprocess.run([OBJCOPY, "-O", "binary", a.elf, mem_bin], capture_output=True)
     mem_size = os.path.getsize(mem_bin)
 
     # CRITICAL (r30-followup bugfix): objcopy -O binary starts the output at the
@@ -236,15 +276,21 @@ def main():
         f.write("[source_buffers]\n")
         f.write("etm_0=ETB_0\n")
 
-    print(f"snapshot written to {a.out_dir}/  (protocol={a.protocol}, core={core_type})")
+    print(
+        f"snapshot written to {a.out_dir}/  (protocol={a.protocol}, core={core_type})"
+    )
     print(f"  trace: {len(trace_bytes)} bytes (format={fmt})")
     print(f"  mem:   {mem_size} bytes @ 0x{mem_base:08x}")
     if is_v4:
-        print(f"  ETMv4 regs: CONFIGR=0x{TRCCONFIGR:08x} TRACEIDR=0x{TRCTRACEIDR_V4:02x} "
-              f"IDR0=0x{TRCIDR0:08x} IDR1=0x{TRCIDR1:08x} IDR2=0x{TRCIDR2:08x}")
+        print(
+            f"  ETMv4 regs: CONFIGR=0x{TRCCONFIGR:08x} TRACEIDR=0x{TRCTRACEIDR_V4:02x} "
+            f"IDR0=0x{TRCIDR0:08x} IDR1=0x{TRCIDR1:08x} IDR2=0x{TRCIDR2:08x}"
+        )
     else:
-        print(f"  ETMv3.5 regs: CR=0x{ETMCR:08x} CCER=0x{ETMCCER:08x} "
-              f"IDR=0x{ETMIDR:08x} TRACEID=0x{ETMTRACEIDR:02x}")
+        print(
+            f"  ETMv3.5 regs: CR=0x{ETMCR:08x} CCER=0x{ETMCCER:08x} "
+            f"IDR=0x{ETMIDR:08x} TRACEID=0x{ETMTRACEIDR:02x}"
+        )
     tpiu_flag = "  (add -tpiu)" if a.coresight else ""
     print(f"\nrun: trc_pkt_lister -ss_dir {a.out_dir} -decode -logstdout" + tpiu_flag)
 

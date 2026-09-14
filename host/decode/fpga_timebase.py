@@ -18,6 +18,7 @@ Key terms:
   RAW index   : position in the FPGA capture buffer (what the table is keyed on)
   out index   : position in the file written by trace_dump (= RAW index - skip)
 """
+
 from __future__ import annotations
 import json
 from bisect import bisect_right
@@ -39,9 +40,15 @@ class TimeBase:
     def load(cls, path):
         with open(path) as f:
             d = json.load(f)
-        return cls(stride=d["stride"], n=d["n"], tick_ns=d["tick_ns"],
-                   last_tick=d["last_tick"], ticks=d["ticks"],
-                   skip=d.get("skip", 0), depth=d.get("depth"))
+        return cls(
+            stride=d["stride"],
+            n=d["n"],
+            tick_ns=d["tick_ns"],
+            last_tick=d["last_tick"],
+            ticks=d["ticks"],
+            skip=d.get("skip", 0),
+            depth=d.get("depth"),
+        )
 
     # ------------------------------------------------------------------
     def _unwrap(self):

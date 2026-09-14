@@ -2,6 +2,7 @@
 
 Run:  pytest -q test_etm35lib.py
 """
+
 import struct
 
 import pytest
@@ -12,16 +13,19 @@ import etm35lib as L
 # ----------------------------------------------------------------------------
 # is_flash
 # ----------------------------------------------------------------------------
-@pytest.mark.parametrize("addr,expected", [
-    (0x08000000, True),
-    (0x08000001, True),          # thumb bit set, still flash
-    (0x0800abcd, True),
-    (0x080FFFFF, True),
-    (0x08100000, False),         # one past the 1MB region
-    (0x20000000, False),         # SRAM
-    (0x00000000, False),
-    (0xF0CCD1F8, False),         # the garbage we saw pre-anchor
-])
+@pytest.mark.parametrize(
+    "addr,expected",
+    [
+        (0x08000000, True),
+        (0x08000001, True),  # thumb bit set, still flash
+        (0x0800ABCD, True),
+        (0x080FFFFF, True),
+        (0x08100000, False),  # one past the 1MB region
+        (0x20000000, False),  # SRAM
+        (0x00000000, False),
+        (0xF0CCD1F8, False),  # the garbage we saw pre-anchor
+    ],
+)
 def test_is_flash(addr, expected):
     assert L.is_flash(addr) is expected
 
@@ -43,7 +47,7 @@ def test_find_async_more_than_five_zeros():
 
 
 def test_find_async_too_few_zeros():
-    data = bytes([0, 0, 0, 0, 0x80])   # only 4 zeros
+    data = bytes([0, 0, 0, 0, 0x80])  # only 4 zeros
     assert L.find_asyncs(data) == []
 
 
@@ -88,38 +92,38 @@ def test_parse_isync_rejects_lsip():
 
 
 def test_parse_isync_rejects_nonflash():
-    pkt = make_isync(0x20001000)        # SRAM addr
+    pkt = make_isync(0x20001000)  # SRAM addr
     assert L.parse_isync_at(pkt, 0) is None
 
 
 def test_parse_isync_rejects_wrong_header():
     pkt = bytearray(make_isync(0x08005414))
-    pkt[0] = 0x88                        # P-header, not I-sync
+    pkt[0] = 0x88  # P-header, not I-sync
     assert L.parse_isync_at(bytes(pkt), 0) is None
 
 
 def test_parse_isync_truncated():
-    pkt = make_isync(0x08005414)[:4]     # too short
+    pkt = make_isync(0x08005414)[:4]  # too short
     assert L.parse_isync_at(pkt, 0) is None
 
 
 def test_find_isyncs_embedded():
-    noise = bytes([0x88, 0x8c, 0x01, 0x40])
+    noise = bytes([0x88, 0x8C, 0x01, 0x40])
     # addresses are even; the Thumb bit is conveyed separately (bit0) and the
     # decoder strips it, so use even base addresses here.
     s1 = make_isync(0x08001234)
-    s2 = make_isync(0x0800abcc, thumb=True)
+    s2 = make_isync(0x0800ABCC, thumb=True)
     data = noise + s1 + noise + s2 + noise
     found = L.find_isyncs(data)
     addrs = [s.addr for s in found]
     assert 0x08001234 in addrs
-    assert 0x0800abcc in addrs
+    assert 0x0800ABCC in addrs
 
 
 def test_recover_pcs_dedup_and_sort():
-    s = make_isync(0x0800abcc)
-    data = s + bytes([0x88]) + s        # same PC twice
-    assert L.recover_pcs(data) == [0x0800abcc]
+    s = make_isync(0x0800ABCC)
+    data = s + bytes([0x88]) + s  # same PC twice
+    assert L.recover_pcs(data) == [0x0800ABCC]
 
 
 def test_thumb_bit_stripped_from_addr():
@@ -146,11 +150,11 @@ def test_bit_shift_known_vector():
     # i.e. right-shifting the misaligned capture by 1 bit recovers the aligned
     # form (minus the leading partial byte). Verify the shift math reproduces
     # the relationship for the trailing 80 84 <-> 40 42 pair.
-    misaligned = bytes([0x40, 0x42])     # 80 84 shifted right 1 (carry)
+    misaligned = bytes([0x40, 0x42])  # 80 84 shifted right 1 (carry)
     # shifting 'misaligned' LEFT by 1 == our stream captured 1 bit late;
     # here we just check bit_shift is the exact inverse operation it claims.
     shifted = L.bit_shift(bytes([0x80, 0x84]), 1)
-    assert shifted[0] == 0x40            # 0x80>>1 | (0x84<<7)&0xff = 0x40
+    assert shifted[0] == 0x40  # 0x80>>1 | (0x84<<7)&0xff = 0x40
     assert len(shifted) == 1
 
 
@@ -163,7 +167,7 @@ def test_bit_shift_recovers_isync_when_offset():
     # Build an I-sync, push the whole stream 3 bits late, and confirm
     # bit_shift(.,3) recovers a parseable I-sync.
     pkt = make_isync(0x08001234)
-    stream = pkt + bytes([0x88, 0x8c])
+    stream = pkt + bytes([0x88, 0x8C])
     # emulate a 3-bit-late capture: shift everything LEFT by 3 (lose low bits)
     late = bytearray()
     prev = 0
@@ -221,7 +225,7 @@ def test_traceif_assemble_locks_and_emits():
     stream = bytes([0xFF] * 12 + [0x7F] + [0x12, 0x34, 0x56, 0x78] * 4)
     out = L.traceif_assemble(stream)
     assert isinstance(out, bytes)
-    assert len(out) > 0                       # locked and emitted packets
+    assert len(out) > 0  # locked and emitted packets
     # deterministic
     assert L.traceif_assemble(stream) == out
 
@@ -233,7 +237,7 @@ def test_traceif_assemble_drops_idle_packets():
     out = L.traceif_assemble(stream)
     # all emitted packets that equal 0x7FFF are dropped; output may be empty or
     # only contain non-idle packets — assert no 0x7fff pair leaked through
-    pairs = [out[k:k + 2] for k in range(0, len(out) - 1, 2)]
+    pairs = [out[k : k + 2] for k in range(0, len(out) - 1, 2)]
     assert b"\xff\x7f" not in pairs
 
 
@@ -285,13 +289,13 @@ def test_phdr_format2():
     # 0x82 = 0b10000010 matches Format-2 mask 0b11110011==0b10000010
     res = L._phdr_atoms(0x82)
     assert res is not None
-    assert sum(res) == 2          # Format-2 always totals 2 atoms
+    assert sum(res) == 2  # Format-2 always totals 2 atoms
 
 
 def test_phdr_not_a_header():
-    assert L._phdr_atoms(0x01) is None     # branch (bit0=1)
-    assert L._phdr_atoms(0x08) is None     # I-sync header
-    assert L._phdr_atoms(0x00) is None     # A-sync zero
+    assert L._phdr_atoms(0x01) is None  # branch (bit0=1)
+    assert L._phdr_atoms(0x08) is None  # I-sync header
+    assert L._phdr_atoms(0x00) is None  # A-sync zero
 
 
 def test_decode_region_atoms_and_branch():
@@ -303,7 +307,7 @@ def test_decode_region_atoms_and_branch():
     kinds = [e.kind for e in events]
     assert kinds == ["atoms", "branch"]
     assert events[0].eatoms == 2
-    assert end == 2               # stopped at the 0x00
+    assert end == 2  # stopped at the 0x00
 
 
 def test_decode_region_stops_on_unknown():
@@ -316,12 +320,12 @@ def test_decode_region_stops_on_unknown():
 
 def test_decode_region_follows_embedded_isync():
     base = 0x08001000
-    s = make_isync(0x0800c0de)
+    s = make_isync(0x0800C0DE)
     data = bytes([0x88]) + s + bytes([0x88, 0x00])
     events, _ = L.decode_region(data, 0, base)
     # first atoms, then the embedded isync re-anchors, then atoms
     assert events[0].kind == "atoms"
-    assert any(e.kind == "isync" and e.addr == 0x0800c0de for e in events)
+    assert any(e.kind == "isync" and e.addr == 0x0800C0DE for e in events)
 
 
 def test_decode_region_stops_on_bad_isync_header():
@@ -339,6 +343,7 @@ def test_decode_region_stops_on_bad_isync_header():
 
 def test_decode_all_on_fixture():
     import os
+
     if not os.path.exists(FIXTURE):
         pytest.skip("fixture missing")
     data = open(FIXTURE, "rb").read()
@@ -358,7 +363,7 @@ def _async_block(payload: bytes) -> bytes:
 
 
 def test_find_isync_in_window_basic():
-    win = bytes([0x88, 0x8c]) + make_isync(0x08001234) + bytes([0x88])
+    win = bytes([0x88, 0x8C]) + make_isync(0x08001234) + bytes([0x88])
     hit = L._find_isync_in_window(win)
     assert hit is not None
     off, s = hit
@@ -366,7 +371,7 @@ def test_find_isync_in_window_basic():
 
 
 def test_find_isync_in_window_none():
-    assert L._find_isync_in_window(bytes([0x88, 0x8c, 0x01, 0x40] * 4)) is None
+    assert L._find_isync_in_window(bytes([0x88, 0x8C, 0x01, 0x40] * 4)) is None
 
 
 def test_decode_aligned_shift0():
@@ -383,7 +388,7 @@ def test_decode_aligned_shift0():
 def test_decode_aligned_recovers_bitshifted_region():
     # Build an aligned region, then shift the WHOLE tail left by 3 bits to
     # emulate a 3-bit-late capture; decode_aligned must find shift==3.
-    payload = make_isync(0x0800c0de) + bytes([0x88, 0x88, 0x00])
+    payload = make_isync(0x0800C0DE) + bytes([0x88, 0x88, 0x00])
     # left-shift tail by 3 bits (capture 3 bits late)
     late = bytearray()
     prev = 0
@@ -394,12 +399,12 @@ def test_decode_aligned_recovers_bitshifted_region():
     regions = L.decode_aligned(data)
     assert len(regions) == 1
     assert regions[0].shift == 3
-    assert regions[0].isync.addr == 0x0800c0de
+    assert regions[0].isync.addr == 0x0800C0DE
 
 
 def test_decode_aligned_skips_async_without_isync():
     # An A-sync followed by no parseable I-sync in the window -> no region.
-    data = _async_block(bytes([0x88, 0x8c, 0x01, 0x40] * 8))
+    data = _async_block(bytes([0x88, 0x8C, 0x01, 0x40] * 8))
     assert L.decode_aligned(data) == []
 
 
@@ -411,6 +416,7 @@ def test_aligned_pcs_dedup():
 
 def test_decode_aligned_on_fixture():
     import os
+
     if not os.path.exists(FIXTURE):
         pytest.skip("fixture missing")
     data = open(FIXTURE, "rb").read()
@@ -435,7 +441,7 @@ def test_tpiu_sync_locks_and_frames():
     # Full-sync 0xFFFFFF7F (wire order FF FF FF 7F) then 16 payload bytes ->
     # one complete frame. Note the amaranth buf packs the first payload byte
     # into the HIGH bits, so the extracted frame is byte-reversed wrt arrival.
-    payload = bytes(range(16))            # 0x00..0x0F
+    payload = bytes(range(16))  # 0x00..0x0F
     stream = bytes([0xFF, 0xFF, 0xFF, 0x7F]) + payload
     frames = L.tpiu_sync_frames(stream)
     assert len(frames) == 1
@@ -452,8 +458,12 @@ def test_tpiu_sync_filters_halfsync():
     # not consume frame byte slots. Build: fullsync, 14 payload, halfsync,
     # 2 more payload -> exactly one 16-byte frame of the 16 real payload bytes.
     payload = bytes(range(16))
-    stream = (bytes([0xFF, 0xFF, 0xFF, 0x7F])
-              + payload[:14] + bytes([0xFF, 0x7F]) + payload[14:])
+    stream = (
+        bytes([0xFF, 0xFF, 0xFF, 0x7F])
+        + payload[:14]
+        + bytes([0xFF, 0x7F])
+        + payload[14:]
+    )
     frames = L.tpiu_sync_frames(stream)
     assert len(frames) == 1
     assert frames[0] == payload[::-1]
@@ -474,13 +484,14 @@ def test_tpiu_sync_on_real_raw_capture():
     # recovers it (the reuse we were missing). The non-swapped order yields 0,
     # which also tells us the correct trace_a/trace_b nibble assignment.
     import os
+
     raw_path = "/tmp/trace_etm.bin"
     if not os.path.exists(raw_path):
         pytest.skip("raw capture not present")
     raw = open(raw_path, "rb").read()
     swapped = bytes((((x & 0xF) << 4) | ((x >> 4) & 0xF)) for x in raw)
     frames = L.tpiu_sync_frames(swapped)
-    assert len(frames) > 100        # hundreds of aligned frames expected
+    assert len(frames) > 100  # hundreds of aligned frames expected
 
 
 # ----------------------------------------------------------------------------
@@ -517,8 +528,8 @@ def test_decode_region_realign_handles_known_packets():
     data = bytes([0x88, 0x0C, 0x66, 0x88, 0x00])
     events, _, realigns = L.decode_region_realign(data, 0, 0x08001000)
     kinds = [e.kind for e in events]
-    assert kinds.count("atoms") == 2     # the two P-headers
-    assert realigns == 0                 # nothing needed realign
+    assert kinds.count("atoms") == 2  # the two P-headers
+    assert realigns == 0  # nothing needed realign
 
 
 def test_decode_region_realign_recovers_after_shift():
@@ -542,14 +553,18 @@ def test_decode_region_realign_recovers_after_shift():
 
 def test_decode_region_realign_on_fixture_extends():
     import os
+
     if not os.path.exists(FIXTURE):
         pytest.skip("fixture missing")
     data = open(FIXTURE, "rb").read()
     syncs = L.find_isyncs(data)
     assert syncs
     s = syncs[0]
-    plain, end_plain, _ = (lambda r: (r[0], r[1], 0))(L.decode_region(data, s.offset + 6, s.addr)) \
-        if False else (None, None, None)
+    plain, end_plain, _ = (
+        (lambda r: (r[0], r[1], 0))(L.decode_region(data, s.offset + 6, s.addr))
+        if False
+        else (None, None, None)
+    )
     ev_plain, end_p = L.decode_region(data, s.offset + 6, s.addr)
     ev_re, end_re, realigns = L.decode_region_realign(data, s.offset + 6, s.addr)
     # realigning version consumes at least as much as the plain walk
@@ -584,6 +599,7 @@ def test_decode_all_realign_runs():
 
 def test_decode_all_realign_on_fixture_extends():
     import os
+
     if not os.path.exists(FIXTURE):
         pytest.skip("fixture missing")
     data = open(FIXTURE, "rb").read()
@@ -598,13 +614,13 @@ def test_decode_all_realign_on_fixture_extends():
 # ----------------------------------------------------------------------------
 def test_isync_rejects_jazelle_bit():
     pkt = bytearray(make_isync(0x08001234))
-    pkt[1] |= 0x10               # bit4 Jazelle set -> not Cortex-M
+    pkt[1] |= 0x10  # bit4 Jazelle set -> not Cortex-M
     assert L.parse_isync_at(bytes(pkt), 0) is None
 
 
 def test_isync_rejects_altisa_bit():
     pkt = bytearray(make_isync(0x08001234))
-    pkt[1] |= 0x04               # bit2 AltISA set -> not Cortex-M
+    pkt[1] |= 0x04  # bit2 AltISA set -> not Cortex-M
     assert L.parse_isync_at(bytes(pkt), 0) is None
 
 
@@ -619,8 +635,8 @@ def test_isync_custom_flash_range_tightens():
     # A valid-looking I-sync at 0x080F0000 passes the default 1MB bound but
     # should be rejected by a tight .text bound of [0x08000000, 0x08030000).
     pkt = make_isync(0x080F0000)
-    assert L.parse_isync_at(pkt, 0) is not None                      # default
-    assert L.parse_isync_at(pkt, 0, flash_hi=0x08030000) is None     # tight
+    assert L.parse_isync_at(pkt, 0) is not None  # default
+    assert L.parse_isync_at(pkt, 0, flash_hi=0x08030000) is None  # tight
 
 
 def test_find_isyncs_respects_tight_range():
@@ -635,7 +651,7 @@ def test_find_isyncs_respects_tight_range():
 def test_flowevent_branch_addr_not_target():
     # decode a region with a branch; the branch FlowEvent must NOT claim its
     # addr is a target (addr_is_target stays False).
-    data = bytes([0x01, 0x00])   # branch packet then async-stop
+    data = bytes([0x01, 0x00])  # branch packet then async-stop
     events, _ = L.decode_region(data, 0, 0x08001000)
     br = [e for e in events if e.kind == "branch"]
     assert br and all(e.addr_is_target is False for e in br)
@@ -651,17 +667,20 @@ def test_flowevent_isync_addr_is_target():
 # ----------------------------------------------------------------------------
 # expand_pheader  (IHI0014Q Table 7-2 / Example 7-1)
 # ----------------------------------------------------------------------------
-@pytest.mark.parametrize("byte,atoms", [
-    (0x80, []),                  # Format-1, 0 E, 0 N
-    (0x88, ["E", "E"]),          # Format-1, EE  (the while(1){nop;b} peak)
-    (0x84, ["E"]),               # Format-1, 1 E
-    (0xC8, ["E", "E", "N"]),     # Format-1, EEN (spec Example 7-1)
-    (0xC0, ["N"]),               # Format-1, 0 E + 1 N
-    (0x8A, ["N", "E"]),          # Format-2, NE  (spec Example 7-1: bit3=1->N,bit2=0->E)
-    (0x82, ["E", "E"]),          # Format-2, both bits 0 -> EE
-    (0x8E, ["N", "N"]),          # Format-2, both bits 1 -> NN
-    (0x86, ["E", "N"]),          # Format-2, bit3=0->E, bit2=1->N
-])
+@pytest.mark.parametrize(
+    "byte,atoms",
+    [
+        (0x80, []),  # Format-1, 0 E, 0 N
+        (0x88, ["E", "E"]),  # Format-1, EE  (the while(1){nop;b} peak)
+        (0x84, ["E"]),  # Format-1, 1 E
+        (0xC8, ["E", "E", "N"]),  # Format-1, EEN (spec Example 7-1)
+        (0xC0, ["N"]),  # Format-1, 0 E + 1 N
+        (0x8A, ["N", "E"]),  # Format-2, NE  (spec Example 7-1: bit3=1->N,bit2=0->E)
+        (0x82, ["E", "E"]),  # Format-2, both bits 0 -> EE
+        (0x8E, ["N", "N"]),  # Format-2, both bits 1 -> NN
+        (0x86, ["E", "N"]),  # Format-2, bit3=0->E, bit2=1->N
+    ],
+)
 def test_expand_pheader(byte, atoms):
     assert L.expand_pheader(byte) == atoms
 
@@ -701,13 +720,13 @@ def test_branch_thumb_two_byte():
     # 2-byte branch carries Address[13:7] in the second byte (C=0 on it).
     prev = 0x08000000
     target = 0x08001234
-    b1 = 0x80 | 0x01 | (((target >> 1) & 0x3F) << 1)     # C=1, A[6:1]
-    b2 = (target >> 7) & 0x7F                             # C=0, A[13:7]
+    b1 = 0x80 | 0x01 | (((target >> 1) & 0x3F) << 1)  # C=1, A[6:1]
+    b2 = (target >> 7) & 0x7F  # C=0, A[13:7]
     res = L.decode_branch_thumb(bytes([b1, b2, 0x00]), 0, prev)
     assert res is not None
     addr, n = res
     assert n == 2
-    assert (addr & 0x3FFF) == (target & 0x3FFF)          # low 14 bits exact
+    assert (addr & 0x3FFF) == (target & 0x3FFF)  # low 14 bits exact
 
 
 def test_branch_thumb_inherits_high_bits_from_prev():
@@ -745,8 +764,7 @@ def test_strip_half_sync_pairs():
 
 
 def test_strip_mixed_full_and_half():
-    data = (bytes([0x08, 0x00]) + bytes.fromhex("ffffff7f")
-            + b"\xff\x7f" + bytes([0x90]))
+    data = bytes([0x08, 0x00]) + bytes.fromhex("ffffff7f") + b"\xff\x7f" + bytes([0x90])
     assert L.strip_tpiu_sync(data) == bytes([0x08, 0x00, 0x90])
 
 
@@ -771,7 +789,7 @@ def test_strip_recovers_isync_through_filler():
     # An I-sync split by half-sync filler is recovered once stripped. (Filler
     # only appears between packets in practice; this checks the strip yields a
     # contiguous, parseable I-sync.)
-    isync = bytes([0x08, 0x00]) + (0x08000ff0 | 1).to_bytes(4, "little")
+    isync = bytes([0x08, 0x00]) + (0x08000FF0 | 1).to_bytes(4, "little")
     framed = isync[:3] + b"\xff\x7f" + isync[3:] + b"\xff\xff\xff\x7f"
     clean = L.strip_tpiu_sync(framed)
     s = L.parse_isync_at(clean, 0)
@@ -787,16 +805,16 @@ def test_tpiu_deframe_single_stream():
     # bytes carry LSB=0 (their true LSB lives in the aux/lowbits byte[15]); odd
     # bytes are full data. Build 14 data bytes after the id, all LSB-safe.
     frame = bytearray(16)
-    frame[0] = (1 << 1) | 1          # stream change -> id 1 (immediate, lowbit0=0)
+    frame[0] = (1 << 1) | 1  # stream change -> id 1 (immediate, lowbit0=0)
     data_bytes = []
     for k in range(1, 15):
-        if k % 2 == 0:               # even index -> must have LSB 0 to be data
+        if k % 2 == 0:  # even index -> must have LSB 0 to be data
             b = 0x10 + (k << 1) & 0xFE
-        else:                        # odd index -> any value
+        else:  # odd index -> any value
             b = 0x20 + k
         frame[k] = b
         data_bytes.append(b)
-    frame[15] = 0x00                 # aux lowbits all zero
+    frame[15] = 0x00  # aux lowbits all zero
     # tpiu_sync_frames consumes arrival order then byte-reverses internally;
     # tpiu_deframe reverses back, so feed arrival order directly.
     stream = bytes.fromhex("ffffff7f") + bytes(frame)
@@ -822,18 +840,18 @@ def _build_tpiu_frame(payload15, stream_id=1, even_lsbs=0):
     simplicity we put the id in byte0 and 14 payload bytes in 1..14, aux=byte15.
     """
     frame = bytearray(16)
-    frame[0] = (stream_id << 1) | 1          # stream-id change, immediate
+    frame[0] = (stream_id << 1) | 1  # stream-id change, immediate
     aux = 0
     for k in range(1, 15):
         frame[k] = payload15[k - 1] & 0xFE if k % 2 == 0 else payload15[k - 1]
         if k % 2 == 0 and (payload15[k - 1] & 1):
-            aux |= (1 << (k // 2))
+            aux |= 1 << (k // 2)
     frame[15] = aux
     return bytes(frame), payload15[:14]
 
 
 def test_tpiu_deframe_hsync_basic():
-    payload = bytes(range(0x80, 0x80 + 14))   # 14 data bytes
+    payload = bytes(range(0x80, 0x80 + 14))  # 14 data bytes
     frame, expect = _build_tpiu_frame(payload, stream_id=2)
     out = L.tpiu_deframe_hsync(frame, phase=0)
     assert out == bytes(expect)
@@ -842,9 +860,9 @@ def test_tpiu_deframe_hsync_basic():
 def test_tpiu_deframe_hsync_restores_even_lsb():
     # An even-position data byte with LSB=1 must be reconstructed from the aux.
     frame = bytearray(16)
-    frame[0] = (2 << 1) | 1                    # stream id 2
-    frame[2] = 0x2E                            # even data byte, LSB stripped
-    frame[15] = 1 << (2 // 2)                  # aux bit for index 2 -> restore LSB
+    frame[0] = (2 << 1) | 1  # stream id 2
+    frame[2] = 0x2E  # even data byte, LSB stripped
+    frame[15] = 1 << (2 // 2)  # aux bit for index 2 -> restore LSB
     out = L.tpiu_deframe_hsync(bytes(frame), phase=0)
     # byte at frame index 2 should come back as 0x2E | 1 = 0x2F
     assert 0x2F in out

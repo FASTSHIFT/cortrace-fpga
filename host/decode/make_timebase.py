@@ -18,6 +18,7 @@ Usage:
 Writes little-endian uint64 ns, length = number of deframed ETM bytes, so it
 lines up 1:1 with the etm.bin deframe_to_etm produced from the same raw.
 """
+
 import argparse
 import struct
 import sys
@@ -30,14 +31,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("raw")
     ap.add_argument("out")
-    ap.add_argument("--byte-ns", type=float, default=1e9 / 56.25e6,
-                    help="ns per RAW capture byte (default 56.25MHz pin)")
+    ap.add_argument(
+        "--byte-ns",
+        type=float,
+        default=1e9 / 56.25e6,
+        help="ns per RAW capture byte (default 56.25MHz pin)",
+    )
     ap.add_argument("--max", type=int, default=40_000_000)
     a = ap.parse_args()
 
     raw = open(a.raw, "rb").read()
     if a.max:
-        raw = raw[:a.max]
+        raw = raw[: a.max]
     # same recovery + deframer as deframe_to_etm, but keep per-ETM-byte source
     # RAW offsets so time lines up with cortrace's byte_index.
     score, parity, order, data, fl, v4a, fsync = R.recover_assemble(raw)
@@ -51,8 +56,10 @@ def main():
         struct.pack_into("<Q", ns, i * 8, t)
     open(a.out, "wb").write(ns)
     span = offs[-1] * a.byte_ns / 1e6 if offs else 0
-    print(f"etm={len(etm)}B  time entries={len(offs)}  byte_ns={a.byte_ns:.3f}  "
-          f"span={span:.2f} ms -> {a.out}")
+    print(
+        f"etm={len(etm)}B  time entries={len(offs)}  byte_ns={a.byte_ns:.3f}  "
+        f"span={span:.2f} ms -> {a.out}"
+    )
 
 
 if __name__ == "__main__":

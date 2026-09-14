@@ -23,6 +23,7 @@ the IDDR sampling itself.
 
 Usage: prbs_check.py <capture.bin> [--max N]
 """
+
 import argparse
 import sys
 
@@ -40,7 +41,7 @@ def payload_ref(n):
         out[i] = s & 0xFF
         s ^= (s << 13) & M
         s &= M
-        s ^= (s >> 17)
+        s ^= s >> 17
         s ^= (s << 5) & M
         s &= M
     return bytes(out)
@@ -54,7 +55,7 @@ def main():
 
     cap = open(a.capture, "rb").read()
     if a.max:
-        cap = cap[:a.max]
+        cap = cap[: a.max]
     if len(cap) < BLK_LEN:
         print("capture too small")
         return 2
@@ -69,20 +70,24 @@ def main():
         i = cap.find(MARKER, i + 1)
     print(f"markers found: {len(marks)}")
     if len(marks) < 2:
-        print("NO/insufficient markers -> stream is not the framed PRBS, or so "
-              "corrupt the 8-byte marker never survives intact.")
+        print(
+            "NO/insufficient markers -> stream is not the framed PRBS, or so "
+            "corrupt the 8-byte marker never survives intact."
+        )
         print("  first 32 cap bytes:", cap[:32].hex())
         return 1
 
     # marker-to-marker spacing distribution
     gaps = [marks[k + 1] - marks[k] for k in range(len(marks) - 1)]
     from collections import Counter
+
     gap_hist = Counter(gaps)
     perfect_gaps = gap_hist.get(BLK_LEN, 0)
-    print(f"block gaps: {len(gaps)}  perfect(=={BLK_LEN}): {perfect_gaps} "
-          f"({100*perfect_gaps/len(gaps):.2f}%)")
-    print("  gap histogram (top 12):",
-          [(g, c) for g, c in gap_hist.most_common(12)])
+    print(
+        f"block gaps: {len(gaps)}  perfect(=={BLK_LEN}): {perfect_gaps} "
+        f"({100*perfect_gaps/len(gaps):.2f}%)"
+    )
+    print("  gap histogram (top 12):", [(g, c) for g, c in gap_hist.most_common(12)])
 
     # per-block payload verification (only for exact-length blocks)
     blocks = 0
@@ -94,13 +99,13 @@ def main():
     for k in range(len(marks) - 1):
         gap = gaps[k]
         if gap < BLK_LEN:
-            drops += (BLK_LEN - gap)
+            drops += BLK_LEN - gap
         elif gap > BLK_LEN:
-            dups += (gap - BLK_LEN)
+            dups += gap - BLK_LEN
         if gap != BLK_LEN:
             continue
         blocks += 1
-        payload = cap[marks[k] + len(MARKER): marks[k + 1]]
+        payload = cap[marks[k] + len(MARKER) : marks[k + 1]]
         bad = sum(1 for x, y in zip(payload, ref_payload) if x != y)
         total_payload_bytes += len(payload)
         total_payload_bad += bad
@@ -109,21 +114,26 @@ def main():
 
     print(f"\nexact-length blocks checked : {blocks}")
     print(f"  fully clean payloads       : {clean_blocks}")
-    print(f"  payload byte errors        : {total_payload_bad}/"
-          f"{total_payload_bytes}")
+    print(
+        f"  payload byte errors        : {total_payload_bad}/" f"{total_payload_bytes}"
+    )
     print(f"estimated dropped bytes      : {drops}")
     print(f"estimated duplicated bytes   : {dups}")
 
     if perfect_gaps == len(gaps) and total_payload_bad == 0:
-        print("\nBYTE-PERFECT: every block is exactly 8192 bytes and every "
-              "payload matches the reseeded xorshift reference.\n=> IDDR-side "
-              "CDC FIFO + DDR ring + gearbox + packetiser + UDP are CLEAN.\n"
-              "=> the residual real-trace corruption is the IDDR SAMPLING "
-              "itself.")
+        print(
+            "\nBYTE-PERFECT: every block is exactly 8192 bytes and every "
+            "payload matches the reseeded xorshift reference.\n=> IDDR-side "
+            "CDC FIFO + DDR ring + gearbox + packetiser + UDP are CLEAN.\n"
+            "=> the residual real-trace corruption is the IDDR SAMPLING "
+            "itself."
+        )
         return 0
-    print("\nDIRTY: the datapath drops/dups/corrupts bytes even for a clean "
-          "trace_clk-domain framed source.\n=> fault is in the CDC FIFO "
-          "handshake / DDR ring / gearbox, NOT the IDDR sampling.")
+    print(
+        "\nDIRTY: the datapath drops/dups/corrupts bytes even for a clean "
+        "trace_clk-domain framed source.\n=> fault is in the CDC FIFO "
+        "handshake / DDR ring / gearbox, NOT the IDDR sampling."
+    )
     # show a couple of short-gap examples
     shorts = [(marks[k], gaps[k]) for k in range(len(gaps)) if gaps[k] != BLK_LEN][:5]
     for pos, g in shorts:

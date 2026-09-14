@@ -12,6 +12,7 @@ window (covers any straddle) and comparing byte-for-byte.
 Skips the first --skip packets (ring fill / PRBS-enable startup transient).
 Verdict: 0 byte errors across all non-startup packets => datapath byte-perfect.
 """
+
 import argparse
 import struct
 import prbs_check as P
@@ -30,7 +31,7 @@ def main():
     ref = block * 3  # a 3-block window: any 1024B packet + its straddle fits
 
     def payload(i):
-        return d[i * rec + 4: (i + 1) * rec]
+        return d[i * rec + 4 : (i + 1) * rec]
 
     checked = 0
     good = 0
@@ -49,7 +50,7 @@ def main():
         Lb = len(block)
         while j >= Lb:
             j -= Lb
-        exp = ref[j:j + 1024]
+        exp = ref[j : j + 1024]
         if exp == pl:
             good += 1
         else:
@@ -60,9 +61,11 @@ def main():
     print(f"  byte-perfect packets : {good}")
     print(f"  bad packets          : {len(bad)}  {bad[:10]}")
     if not bad:
-        print("\nPRBS BYTE-PERFECT: every non-startup packet matches the framed "
-              "xorshift reference exactly.\n=> capture -> CDC -> DDR ring -> "
-              "gearbox -> packetiser -> UDP path is clean end to end.")
+        print(
+            "\nPRBS BYTE-PERFECT: every non-startup packet matches the framed "
+            "xorshift reference exactly.\n=> capture -> CDC -> DDR ring -> "
+            "gearbox -> packetiser -> UDP path is clean end to end."
+        )
         return 0
     return 1
 

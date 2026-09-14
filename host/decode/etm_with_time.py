@@ -24,6 +24,7 @@ number of raw bytes per TPIU byte (4-bit: 1, 2-bit: 2, 1-bit: 4) to scale them
 back; without it the whole trace collapses into the first fraction of the
 timeline.
 """
+
 import json
 import sys
 
@@ -73,30 +74,40 @@ def main():
         f.write(etm)
     side = out_path + ".time.json"
     with open(side, "w") as f:
-        json.dump({"tick_ns": tb.tick_ns,
-                   "span_ns": tb.span_ns(),
-                   "n_etm_bytes": len(etm),
-                   "times_ns": times_ns}, f)
+        json.dump(
+            {
+                "tick_ns": tb.tick_ns,
+                "span_ns": tb.span_ns(),
+                "n_etm_bytes": len(etm),
+                "times_ns": times_ns,
+            },
+            f,
+        )
     # Also emit a compact binary the C++ side (orbetto/Mortrall) can mmap/read:
     # one little-endian uint64 ns per ETM byte, in stream order. This is the
     # 1:1 companion to the ETM bytes orbetto's TPIU deframer delivers.
     import struct
+
     binside = out_path + ".time.bin"
     with open(binside, "wb") as f:
-        f.write(struct.pack(f"<{len(times_ns)}Q",
-                            *[int(round(t)) for t in times_ns]))
+        f.write(struct.pack(f"<{len(times_ns)}Q", *[int(round(t)) for t in times_ns]))
 
     # Report
     unk = sum(1 for c in etm if L._classify(c) == "unknown")
-    print(f"deframed {len(raw)} RAW -> {len(etm)} ETM bytes "
-          f"(official: frames={st['packets']} fsync={st['syncs']}, "
-          f"unknown {100*unk/max(1,len(etm)):.3f}%)")
+    print(
+        f"deframed {len(raw)} RAW -> {len(etm)} ETM bytes "
+        f"(official: frames={st['packets']} fsync={st['syncs']}, "
+        f"unknown {100*unk/max(1,len(etm)):.3f}%)"
+    )
     if times_ns:
         span = times_ns[-1] - times_ns[0]
-        nondec = sum(1 for k in range(1, len(times_ns))
-                     if times_ns[k] < times_ns[k - 1] - 1e-6)
-        print(f"time: {times_ns[0]/1e3:.1f}..{times_ns[-1]/1e3:.1f} us "
-              f"(span {span/1e3:.1f} us), non-decreasing violations: {nondec}")
+        nondec = sum(
+            1 for k in range(1, len(times_ns)) if times_ns[k] < times_ns[k - 1] - 1e-6
+        )
+        print(
+            f"time: {times_ns[0]/1e3:.1f}..{times_ns[-1]/1e3:.1f} us "
+            f"(span {span/1e3:.1f} us), non-decreasing violations: {nondec}"
+        )
     print(f"wrote {out_path} + {side} + {binside}")
     return 0
 

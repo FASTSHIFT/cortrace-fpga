@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# cortrace-fpga pre-commit hook: block a commit whose STAGED Python/Verilog is
+# not formatted. Python -> black --check (+ ruff lint if present). Verilog ->
+# whitespace invariants (or verible if installed). Missing formatters are
+# skipped with a note (never blocks on a tool that isn't there).
+#
+# Install with: scripts/install-hooks.sh  (sets core.hooksPath to .githooks)
+set -euo pipefail
+
+fail=0
+
+# ---- staged Python ----
+mapfile -t PY < <(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
+if [[ ${#PY[@]} -gt 0 ]]; then
+    if command -v black >/dev/null 2>&1; then
+        if ! black --quiet --check "${PY[@]}" 2>/dev/null; then
+            echo "pre-commit: black --check failed on staged Python"
+            fail=1
+        fi
+    else
+        echo "pre-commit: black not found; skipping Python format check" >&2
+    fi
+fi
+
+# ---- staged Verilog (skip vendored external/ + third-party ddr3/) ----
+mapfile -t V < <(git diff --cached --name-only --diff-filter=ACM \
+    | grep -E '\.v$' | grep -v 'external/' | grep -v 'rtl/ddr3/' || true)
+for f in "${V[@]}"; do
+    [[ -f "$f" ]] || continue
+    if command -v verible-verilog-format >/dev/null 2>&1; then
+        diff -q <(verible-verilog-format "$f") "$f" >/dev/null \
+            || { echo "pre-commit: verilog needs formatting -> $f"; fail=1; }
+    else
+        grep -nP '\t' "$f" >/dev/null 2>&1 && { echo "pre-commit: hard tab in $f"; fail=1; }
+        grep -nP ' +$' "$f" >/dev/null 2>&1 && { echo "pre-commit: trailing whitespace in $f"; fail=1; }
+    fi
+done
+
+if [[ $fail -ne 0 ]]; then
+    echo "" >&2
+    echo "commit blocked: fix with 'scripts/format.sh' then re-stage." >&2
+    exit 1
+fi

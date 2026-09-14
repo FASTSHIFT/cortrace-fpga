@@ -33,6 +33,7 @@ Prints:
       when comparing to an FPGA capture)
     - How many valid bytes drained (words != 0xFFFFFFFF marker = "empty")
 """
+
 import argparse
 import os
 import re
@@ -41,22 +42,26 @@ import sys
 import tempfile
 from pathlib import Path
 
-BRINGUP = Path(__file__).resolve().parents[1]         # syn/artix7/bringup
-REPO_ROOT = BRINGUP.parents[2]                        # orbtrace/
+BRINGUP = Path(__file__).resolve().parents[1]  # syn/artix7/bringup
+REPO_ROOT = BRINGUP.parents[2]  # orbtrace/
 
 
 def run_openocd(cfg_env: dict, cfg_path: Path, timeout=30) -> str:
     """Run OpenOCD with the etf_dump config and return stdout."""
     cmd = [
         "openocd",
-        "-f", "interface/cmsis-dap.cfg",
-        "-f", "target/stm32h7x.cfg",
-        "-f", str(cfg_path),
+        "-f",
+        "interface/cmsis-dap.cfg",
+        "-f",
+        "target/stm32h7x.cfg",
+        "-f",
+        str(cfg_path),
     ]
     env = os.environ.copy()
     env.update(cfg_env)
-    r = subprocess.run(cmd, capture_output=True, text=True, env=env,
-                       cwd=REPO_ROOT, timeout=timeout)
+    r = subprocess.run(
+        cmd, capture_output=True, text=True, env=env, cwd=REPO_ROOT, timeout=timeout
+    )
     if r.returncode != 0:
         sys.stderr.write(r.stderr)
         raise SystemExit(f"openocd failed rc={r.returncode}")
@@ -70,7 +75,7 @@ def parse_dump(log: str) -> tuple[bytes, dict]:
     m_end = re.search(r"==== END DUMP ====", log)
     if not m_begin or not m_end:
         raise SystemExit("etf dump markers missing in openocd output")
-    body = log[m_begin.end():m_end.start()]
+    body = log[m_begin.end() : m_end.start()]
     words = []
     for line in body.splitlines():
         line = line.strip()
@@ -108,16 +113,23 @@ def parse_dump(log: str) -> tuple[bytes, dict]:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="write golden bytes here")
-    ap.add_argument("--words", type=int, default=1024,
-                    help="how many RRD reads (each = 4 bytes; ETF is 4KB total)")
-    ap.add_argument("--no-restore", action="store_true",
-                    help="do NOT restore ETF to HW-FIFO after the dump "
-                         "(default restores it). The dump sequence freezes the "
-                         "ETF in circular mode with TraceCaptEn=0, which STOPS "
-                         "data flowing to the TPIU pins -- so the FPGA/LA then "
-                         "see only HSYNC filler until HW-FIFO is restored. "
-                         "Auto-restoring here prevents the recurring 'only "
-                         "HSYNC / only CLK+D3 moving' confusion.")
+    ap.add_argument(
+        "--words",
+        type=int,
+        default=1024,
+        help="how many RRD reads (each = 4 bytes; ETF is 4KB total)",
+    )
+    ap.add_argument(
+        "--no-restore",
+        action="store_true",
+        help="do NOT restore ETF to HW-FIFO after the dump "
+        "(default restores it). The dump sequence freezes the "
+        "ETF in circular mode with TraceCaptEn=0, which STOPS "
+        "data flowing to the TPIU pins -- so the FPGA/LA then "
+        "see only HSYNC filler until HW-FIFO is restored. "
+        "Auto-restoring here prevents the recurring 'only "
+        "HSYNC / only CLK+D3 moving' confusion.",
+    )
     a = ap.parse_args()
 
     cfg = BRINGUP / "target" / "etf_dump_h743.cfg"
@@ -129,8 +141,10 @@ def main():
 
     Path(a.out).write_bytes(data)
     print(f"wrote {len(data)} bytes -> {a.out}")
-    print(f"ETF state at freeze: RSZ={state['RSZ']}  STS={state['STS']}  "
-          f"RRP={state['RRP']}  RWP={state['RWP']}  MODE={state['MODE']}")
+    print(
+        f"ETF state at freeze: RSZ={state['RSZ']}  STS={state['STS']}  "
+        f"RRP={state['RRP']}  RWP={state['RWP']}  MODE={state['MODE']}"
+    )
     if state.get("RSZ"):
         print(f"  (RSZ*4 = {state['RSZ']*4} bytes of ETF RAM)")
 
@@ -138,11 +152,15 @@ def main():
         restore = BRINGUP / "target" / "etf_hw_fifo_restore.cfg"
         if restore.exists():
             run_openocd({}, restore, timeout=20)
-            print("ETF restored to HW-FIFO (TPIU pins live again). "
-                  "Use --no-restore to skip.")
+            print(
+                "ETF restored to HW-FIFO (TPIU pins live again). "
+                "Use --no-restore to skip."
+            )
         else:
-            print(f"WARNING: {restore} missing; ETF left frozen -- FPGA/LA "
-                  f"will see only HSYNC until you restore HW-FIFO manually.")
+            print(
+                f"WARNING: {restore} missing; ETF left frozen -- FPGA/LA "
+                f"will see only HSYNC until you restore HW-FIFO manually."
+            )
 
 
 if __name__ == "__main__":

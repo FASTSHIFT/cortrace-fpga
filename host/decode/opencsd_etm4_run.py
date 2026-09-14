@@ -24,6 +24,7 @@ Usage:
     python3 opencsd_etm4_run.py <raw-stream.bin> <elf> [--period-ns 20.0] \
         [--keep <out_dir>]  # keep snapshot dir + intermediate ETM bin
 """
+
 import argparse
 import os
 import re
@@ -58,13 +59,26 @@ def _mem_limit_preexec(mb):
     def _apply():
         nbytes = mb * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_AS, (nbytes, nbytes))
+
     return _apply
+
 
 # The expected user functions in func_test.c (see verify_func_test.py).
 EXPECTED = {
-    "main_loop", "level_a", "level_b", "level_c", "frame_func",
-    "leaf_add", "leaf_mul", "indirect_caller", "callback_test",
-    "dispatch_callback", "factorial", "deep1", "conditional", "mixed_test",
+    "main_loop",
+    "level_a",
+    "level_b",
+    "level_c",
+    "frame_func",
+    "leaf_add",
+    "leaf_mul",
+    "indirect_caller",
+    "callback_test",
+    "dispatch_callback",
+    "factorial",
+    "deep1",
+    "conditional",
+    "mixed_test",
 }
 
 
@@ -154,14 +168,13 @@ def recover_assemble(raw, stream=2):
                     etm = b""
             except Exception:
                 etm = b""
-            v4d = count_async(etm)              # A-sync AFTER deframe: strongest
-            v4a = count_async(data)             # A-sync before deframe
+            v4d = count_async(etm)  # A-sync AFTER deframe: strongest
+            v4a = count_async(data)  # A-sync before deframe
             fl = sum(1 for s in L.find_isyncs(data) if L.is_flash(s.addr))
             # Ranking: post-deframe A-sync dominates (it is the only signal that
             # proves the whole chain aligned), then deframed payload size, then
             # pre-deframe A-sync, raw fsync, and flash I-sync as tie-breakers.
-            score = (v4d * 1000000 + len(etm) * 10 + v4a * 100
-                     + fsync + fl)
+            score = v4d * 1000000 + len(etm) * 10 + v4a * 100 + fsync + fl
             if best is None or score > best[0]:
                 best = (score, parity, order, data, fl, v4a, fsync)
     return best
@@ -194,10 +207,27 @@ def deframe(data):
     return bytes(data)
 
 
-STRICT_RESERVED = frozenset({
-    0x83, 0x84, 0x87, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F,
-    0x93, 0x94, 0x97, 0x98, 0x99, 0x9C, 0x9F,
-})
+STRICT_RESERVED = frozenset(
+    {
+        0x83,
+        0x84,
+        0x87,
+        0x89,
+        0x8A,
+        0x8B,
+        0x8C,
+        0x8D,
+        0x8E,
+        0x8F,
+        0x93,
+        0x94,
+        0x97,
+        0x98,
+        0x99,
+        0x9C,
+        0x9F,
+    }
+)
 ATOM_HDRS = frozenset(range(0xC0, 0x100))
 
 
@@ -207,7 +237,7 @@ def diagnose_bitflip(etm):
     a specific data-lane bit is being flipped in ~30% of TRACECLK cycles
     (see PROPOSAL 3x: capture-front-end fault, not decoder fault)."""
     n_atom_next = 0
-    n_reserved  = 0
+    n_reserved = 0
     n_recoverable = 0
     for i in range(len(etm) - 1):
         if etm[i] in ATOM_HDRS:
@@ -254,7 +284,7 @@ def fix_async_alignment(etm):
             # We just wrote the A-sync terminator. Look ahead: if the next
             # byte is not 0x01 but the byte AFTER it is 0x01, drop the stray.
             if i + 2 < n and etm[i + 1] != 0x01 and etm[i + 2] == 0x01:
-                i += 1               # skip one byte
+                i += 1  # skip one byte
                 fixed += 1
             elif i + 1 < n and etm[i + 1] == 0x01:
                 kept += 1
@@ -298,8 +328,9 @@ def parse_lister_output(text):
             n_isync += 1
         elif "EXCEPTION" in line:
             n_exc += 1
-    return pcs, dict(instr_ranges=n_ranges, pe_context=n_pe_ctx,
-                     isync=n_isync, exception=n_exc)
+    return pcs, dict(
+        instr_ranges=n_ranges, pe_context=n_pe_ctx, isync=n_isync, exception=n_exc
+    )
 
 
 def nm_symbols(elf):
@@ -333,22 +364,40 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("raw")
     ap.add_argument("elf")
-    ap.add_argument("--period-ns", type=float, default=20.0,
-                    help="TRACECLK period (50MHz=20)")
-    ap.add_argument("--deframer", choices=("official", "walk"),
-                    default="official",
-                    help="TPIU deframer: official (orbuculum port, default) or "
-                         "walk (legacy home-grown)")
-    ap.add_argument("--stream", type=int, default=2,
-                    help="TPIU stream/tag to extract (ETM=2)")
-    ap.add_argument("--width", type=int, choices=(4, 2, 1), default=4,
-                    help="TPIU parallel port width of the capture (default 4). "
-                         "At 2/1 bit a TPIU byte spans 2/4 TRACECLK periods, so "
-                         "the raw capture is regrouped accordingly")
-    ap.add_argument("--keep", type=str, default=None,
-                    help="keep the OpenCSD snapshot dir (and etm.bin) here")
-    ap.add_argument("--dump-lister", type=str, default=None,
-                    help="save trc_pkt_lister stdout to this file")
+    ap.add_argument(
+        "--period-ns", type=float, default=20.0, help="TRACECLK period (50MHz=20)"
+    )
+    ap.add_argument(
+        "--deframer",
+        choices=("official", "walk"),
+        default="official",
+        help="TPIU deframer: official (orbuculum port, default) or "
+        "walk (legacy home-grown)",
+    )
+    ap.add_argument(
+        "--stream", type=int, default=2, help="TPIU stream/tag to extract (ETM=2)"
+    )
+    ap.add_argument(
+        "--width",
+        type=int,
+        choices=(4, 2, 1),
+        default=4,
+        help="TPIU parallel port width of the capture (default 4). "
+        "At 2/1 bit a TPIU byte spans 2/4 TRACECLK periods, so "
+        "the raw capture is regrouped accordingly",
+    )
+    ap.add_argument(
+        "--keep",
+        type=str,
+        default=None,
+        help="keep the OpenCSD snapshot dir (and etm.bin) here",
+    )
+    ap.add_argument(
+        "--dump-lister",
+        type=str,
+        default=None,
+        help="save trc_pkt_lister stdout to this file",
+    )
     a = ap.parse_args()
 
     raw = open(a.raw, "rb").read()
@@ -386,21 +435,27 @@ def main():
     # Candidate 2: nibble-reassemble ({trace_b,trace_a} per period) then deframe.
     if a.width == 4:
         score, parity, order, data, fl, v4a, fsync = recover_assemble(
-            raw, stream=a.stream)
+            raw, stream=a.stream
+        )
         what = f"parity={parity} order={order}"
     else:
         score, parity, order, data, fl, v4a, fsync = recover_assemble_width(
-            raw, a.width, stream=a.stream)
+            raw, a.width, stream=a.stream
+        )
         what = f"{a.width}-bit phase={parity} order={'lsb' if not order else 'msb'}"
     etm_asm = _direct_deframe(data)
     a_asm, _ = count_v4_syncs(etm_asm) if etm_asm else (0, 0)
 
-    print(f"[2] candidate A-syncs: direct-deframe={a_direct}  "
-          f"nibble-reassemble({what})={a_asm}  fsync={fsync}")
+    print(
+        f"[2] candidate A-syncs: direct-deframe={a_direct}  "
+        f"nibble-reassemble({what})={a_asm}  fsync={fsync}"
+    )
     if a_asm >= a_direct:
         etm = etm_asm
-        print(f"[2] chose NIBBLE-REASSEMBLE ({what}); "
-              f"assembled={len(data)}B -> ETM {len(etm)}B")
+        print(
+            f"[2] chose NIBBLE-REASSEMBLE ({what}); "
+            f"assembled={len(data)}B -> ETM {len(etm)}B"
+        )
     else:
         etm = etm_direct
         print(f"[2] chose DIRECT-DEFRAME; ETM {len(etm)}B")
@@ -423,9 +478,9 @@ def main():
     open(etm_path, "wb").write(etm)
 
     r = subprocess.run(
-        [sys.executable, PACKER, etm_path, a.elf, snapdir,
-         "--protocol", "etm4"],
-        capture_output=True, text=True,
+        [sys.executable, PACKER, etm_path, a.elf, snapdir, "--protocol", "etm4"],
+        capture_output=True,
+        text=True,
     )
     if r.returncode != 0:
         print("[FAIL] snapshot build:", r.stderr, file=sys.stderr)
@@ -438,13 +493,17 @@ def main():
     try:
         r = subprocess.run(
             [LISTER, "-ss_dir", snapdir, "-decode", "-logstdout"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
             preexec_fn=_mem_limit_preexec(LISTER_MEM_MB),
         )
     except MemoryError:
-        print("[5] lister hit the RLIMIT_AS cap (libopencsd allocation blowup); "
-              "treat as a decode failure, not an OOM. Raise LISTER_MEM_MB to "
-              "retry.", file=sys.stderr)
+        print(
+            "[5] lister hit the RLIMIT_AS cap (libopencsd allocation blowup); "
+            "treat as a decode failure, not an OOM. Raise LISTER_MEM_MB to "
+            "retry.",
+            file=sys.stderr,
+        )
         if tmpctx:
             tmpctx.cleanup()
         return 3
@@ -457,9 +516,11 @@ def main():
         print("    lister exited with", r.returncode)
 
     pcs, stats = parse_lister_output(text)
-    print(f"[6] decoder: INSTR_RANGE={stats['instr_ranges']}  "
-          f"PE_CONTEXT/I_ADDR={stats['pe_context']}  "
-          f"ISYNC/TRACE_ON={stats['isync']}  EXCEPTION={stats['exception']}")
+    print(
+        f"[6] decoder: INSTR_RANGE={stats['instr_ranges']}  "
+        f"PE_CONTEXT/I_ADDR={stats['pe_context']}  "
+        f"ISYNC/TRACE_ON={stats['isync']}  EXCEPTION={stats['exception']}"
+    )
     print(f"    unique PCs: {len(pcs)}")
 
     if not pcs:
@@ -471,12 +532,15 @@ def main():
         return 2
 
     in_flash = [p for p in pcs if 0x08000000 <= p < 0x08200000]
-    print(f"    in flash: {len(in_flash)}/{len(pcs)} "
-          f"({100 * len(in_flash) / len(pcs):.1f}%)")
+    print(
+        f"    in flash: {len(in_flash)}/{len(pcs)} "
+        f"({100 * len(in_flash) / len(pcs):.1f}%)"
+    )
 
     syms = nm_symbols(a.elf)
     if syms:
         from collections import Counter
+
         cov = Counter(func_of(syms, p) for p in in_flash)
         cov.pop(None, None)
         seen = set(cov)

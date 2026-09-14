@@ -6,6 +6,7 @@ PRBS contiguity independent of stream_grab's seq-stripping concatenation.
 Usage: sudo python3 prbs_raw_grab.py <iface> <seconds> <out.npz-ish txt>
 Writes a simple binary: repeated [4B seq][1024B payload].
 """
+
 import socket
 import sys
 import time

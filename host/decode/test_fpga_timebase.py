@@ -8,6 +8,7 @@ tables that model the three cases that matter:
   * a 32-bit counter wrap (long capture).
 No hardware needed.
 """
+
 import json
 import os
 import tempfile
@@ -22,14 +23,21 @@ def make(stride, ticks, last_tick=None, skip=0, depth=None, tick_ns=5.0):
         last_tick = ticks[-1]
     if depth is None:
         depth = (n - 1) * stride + 1
-    return TimeBase(stride=stride, n=n, tick_ns=tick_ns, last_tick=last_tick,
-                    ticks=ticks, skip=skip, depth=depth)
+    return TimeBase(
+        stride=stride,
+        n=n,
+        tick_ns=tick_ns,
+        last_tick=last_tick,
+        ticks=ticks,
+        skip=skip,
+        depth=depth,
+    )
 
 
 def test_steady_linear():
     # 100 ticks between every 256 bytes -> 100*5ns per 256 bytes
     stride = 256
-    ticks = [k * 100 for k in range(5)]      # 0,100,200,300,400
+    ticks = [k * 100 for k in range(5)]  # 0,100,200,300,400
     tb = make(stride, ticks)
     assert tb.ns_for_raw(0) == 0.0
     assert tb.ns_for_raw(256) == pytest.approx(100 * 5.0)
@@ -109,8 +117,15 @@ def test_skip_offset():
 def test_load_roundtrip():
     stride = 256
     ticks = [0, 100, 200, 300]
-    d = {"stride": stride, "n": len(ticks), "tick_ns": 5.0,
-         "last_tick": 300, "ticks": ticks, "skip": 0, "depth": 769}
+    d = {
+        "stride": stride,
+        "n": len(ticks),
+        "tick_ns": 5.0,
+        "last_tick": 300,
+        "ticks": ticks,
+        "skip": 0,
+        "depth": 769,
+    }
     with tempfile.NamedTemporaryFile("w", suffix=".ts.json", delete=False) as f:
         json.dump(d, f)
         path = f.name

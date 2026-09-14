@@ -16,6 +16,7 @@ TRACECLK period, so each ETM byte's ns = (its source assembled-byte offset) *
 period_ns. --period-ns defaults to the 56.25 MHz TRACECLK pin (17.778 ns).
 This is frequency-agnostic and needs no FPGA timestamp sidecar.
 """
+
 import struct
 import sys
 
@@ -27,7 +28,7 @@ raw_path, out_path = argv[0], argv[1]
 maxb = int(argv[2]) if len(argv) > 2 else 0
 
 time_path = None
-period_ns = 1e9 / 56.25e6   # 56.25 MHz TRACECLK pin -> 17.778 ns/period
+period_ns = 1e9 / 56.25e6  # 56.25 MHz TRACECLK pin -> 17.778 ns/period
 for i, a in enumerate(sys.argv):
     if a == "--time":
         time_path = sys.argv[i + 1]
@@ -48,16 +49,21 @@ if time_path:
     # assembled RAW stream, one byte per TRACECLK period). ns = offset*period.
     etm, offs, stats = T.deframe(data, want_stream=2, with_offsets=True)
     with open(time_path, "wb") as f:
-        f.write(struct.pack(f"<{len(offs)}Q",
-                            *[int(round(o * period_ns)) for o in offs]))
+        f.write(
+            struct.pack(f"<{len(offs)}Q", *[int(round(o * period_ns)) for o in offs])
+        )
     span_us = (offs[-1] - offs[0]) * period_ns / 1e3 if offs else 0
     open(out_path, "wb").write(etm)
-    print(f"raw={len(raw)} parity={parity} order={order} fsync={fsync} "
-          f"-> etm={len(etm)} bytes  frames={stats['packets']}  "
-          f"time: {len(offs)} entries span {span_us:.1f} us -> {time_path}")
+    print(
+        f"raw={len(raw)} parity={parity} order={order} fsync={fsync} "
+        f"-> etm={len(etm)} bytes  frames={stats['packets']}  "
+        f"time: {len(offs)} entries span {span_us:.1f} us -> {time_path}"
+    )
 else:
     etm, stats = T.deframe(data, want_stream=2)
     open(out_path, "wb").write(etm)
-    print(f"raw={len(raw)} parity={parity} order={order} fsync={fsync} "
-          f"pre-deframe-async={v4a} -> etm={len(etm)} bytes  "
-          f"frames={stats['packets']}")
+    print(
+        f"raw={len(raw)} parity={parity} order={order} fsync={fsync} "
+        f"pre-deframe-async={v4a} -> etm={len(etm)} bytes  "
+        f"frames={stats['packets']}"
+    )

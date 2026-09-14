@@ -19,6 +19,7 @@ Standalone usage:
     h743_serial.py pll --m 2 --n 24 --p 3 --r 2 --apply
     h743_serial.py reset
 """
+
 import argparse
 import glob
 import re
@@ -55,6 +56,7 @@ class H743CLI:
     '> ' (or a bare newline followed by '> ') as end-of-reply. Timeouts fail
     loudly rather than silently returning half a reply.
     """
+
     PROMPT = "> "
     READ_CHUNK = 128
 
@@ -62,8 +64,7 @@ class H743CLI:
         self.port_name = port
         self.baud = baud
         self.timeout = timeout
-        self.s = serial.Serial(port, baudrate=baud, timeout=0.1,
-                               write_timeout=1.0)
+        self.s = serial.Serial(port, baudrate=baud, timeout=0.1, write_timeout=1.0)
         # Drain anything already in the buffer (previous session's output).
         time.sleep(0.05)
         try:
@@ -82,8 +83,7 @@ class H743CLI:
 
     def _drain_until_prompt(self, *, bootstrap=False, timeout=None) -> str:
         """Read until we see the prompt at the end of a line, or timeout."""
-        deadline = time.monotonic() + (timeout if timeout is not None
-                                                else self.timeout)
+        deadline = time.monotonic() + (timeout if timeout is not None else self.timeout)
         buf = bytearray()
         if bootstrap:
             self.s.write(b"\r\n")
@@ -99,8 +99,8 @@ class H743CLI:
         # timed out
         text = buf.decode(errors="replace")
         raise TimeoutError(
-            f"CLI silent for {timeout or self.timeout}s\n"
-            f"partial output:\n{text!r}")
+            f"CLI silent for {timeout or self.timeout}s\n" f"partial output:\n{text!r}"
+        )
 
     def send(self, line: str, timeout: float | None = None) -> str:
         """Send one CLI command; return the response text (without prompt)."""
@@ -111,7 +111,8 @@ class H743CLI:
             self.s.write((clean_line + "\r\n").encode())
             self.s.flush()
         response = self._drain_until_prompt(
-            timeout=(timeout if timeout is not None else self.timeout))
+            timeout=(timeout if timeout is not None else self.timeout)
+        )
         # Remove any leading echo of the command + trailing prompt.
         body = response
         # First occurrence of the echo -> strip up to and including the CR/LF
@@ -120,24 +121,31 @@ class H743CLI:
         if i >= 0:
             j = body.find("\n", i)
             if j >= 0:
-                body = body[j + 1:]
+                body = body[j + 1 :]
         # Remove trailing prompt.
         if body.endswith(self.PROMPT):
-            body = body[:-len(self.PROMPT)]
+            body = body[: -len(self.PROMPT)]
         return body.strip("\r\n")
 
 
 # -- convenience API used by fpga_vs_etf.py ---------------------------------
 
-def pll_apply(cli: H743CLI, *, m=None, n=None, p=None, q=None, r=None,
-              timeout=5.0) -> str:
+
+def pll_apply(
+    cli: H743CLI, *, m=None, n=None, p=None, q=None, r=None, timeout=5.0
+) -> str:
     """Compose and execute a `pll --apply` command. Returns full response."""
     parts = ["pll"]
-    if m is not None: parts += [f"--m", str(m)]
-    if n is not None: parts += [f"--n", str(n)]
-    if p is not None: parts += [f"--p", str(p)]
-    if q is not None: parts += [f"--q", str(q)]
-    if r is not None: parts += [f"--r", str(r)]
+    if m is not None:
+        parts += [f"--m", str(m)]
+    if n is not None:
+        parts += [f"--n", str(n)]
+    if p is not None:
+        parts += [f"--p", str(p)]
+    if q is not None:
+        parts += [f"--q", str(q)]
+    if r is not None:
+        parts += [f"--r", str(r)]
     parts += ["--apply"]
     return cli.send(" ".join(parts), timeout=timeout)
 
@@ -147,19 +155,24 @@ def pll_show(cli: H743CLI) -> dict:
     resp = cli.send("pll --show")
     out = {}
     for k, pat in [
-        ("m", r"M=(\d+)"), ("n", r"N=(\d+)"), ("p", r"P=(\d+)"),
-        ("q", r"Q=(\d+)"), ("r", r"R=(\d+)"),
-        ("hse_hz",     r"HSE\s*=\s*(\d+)"),
-        ("vco_hz",     r"VCO\s*=\s*(\d+)"),
-        ("sysclk_hz",  r"sysclk\s*=\s*(\d+)"),
-        ("pll1r_hz",   r"pll1_r_ck\s*=\s*(\d+)"),
+        ("m", r"M=(\d+)"),
+        ("n", r"N=(\d+)"),
+        ("p", r"P=(\d+)"),
+        ("q", r"Q=(\d+)"),
+        ("r", r"R=(\d+)"),
+        ("hse_hz", r"HSE\s*=\s*(\d+)"),
+        ("vco_hz", r"VCO\s*=\s*(\d+)"),
+        ("sysclk_hz", r"sysclk\s*=\s*(\d+)"),
+        ("pll1r_hz", r"pll1_r_ck\s*=\s*(\d+)"),
     ]:
         m = re.search(pat, resp)
-        if m: out[k] = int(m.group(1))
+        if m:
+            out[k] = int(m.group(1))
     return out
 
 
 # -- standalone CLI ---------------------------------------------------------
+
 
 def main():
     # Manual argv scan (not argparse) because the whole point is to forward
@@ -172,19 +185,25 @@ def main():
     while argv and argv[0].startswith("--"):
         opt = argv[0]
         if opt == "--":
-            argv.pop(0); break
+            argv.pop(0)
+            break
         if opt == "-h" or opt == "--help":
             print(__doc__)
-            print("usage: h743_serial.py [--port P] [--baud B] [--timeout T] "
-                  "<cmd> [args...]")
+            print(
+                "usage: h743_serial.py [--port P] [--baud B] [--timeout T] "
+                "<cmd> [args...]"
+            )
             return
         if opt in ("--port", "--baud", "--timeout"):
             if len(argv) < 2:
                 sys.exit(f"{opt} needs a value")
             val = argv[1]
-            if opt == "--port":    port = val
-            elif opt == "--baud":  baud = int(val)
-            elif opt == "--timeout": timeout = float(val)
+            if opt == "--port":
+                port = val
+            elif opt == "--baud":
+                baud = int(val)
+            elif opt == "--timeout":
+                timeout = float(val)
             argv = argv[2:]
         else:
             break

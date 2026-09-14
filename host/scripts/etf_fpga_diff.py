@@ -24,6 +24,7 @@ Verdict:
 Usage:
     etf_fpga_diff.py golden.bin fpga_etm.bin [--tol 0.05] [--topn 20]
 """
+
 import argparse
 import sys
 from collections import Counter
@@ -40,11 +41,21 @@ def rel(freq: dict, total: int) -> dict:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("golden", help="ETF DAP-golden bytes (etf_dap_golden.py)")
-    ap.add_argument("fpga", help="FPGA-side deframed ETM bytes (opencsd_etm4_run --keep)")
-    ap.add_argument("--tol", type=float, default=0.05,
-                    help="tolerance on relative frequency divergence (default 5%)")
-    ap.add_argument("--topn", type=int, default=20,
-                    help="how many top byte values to score (default 20)")
+    ap.add_argument(
+        "fpga", help="FPGA-side deframed ETM bytes (opencsd_etm4_run --keep)"
+    )
+    ap.add_argument(
+        "--tol",
+        type=float,
+        default=0.05,
+        help="tolerance on relative frequency divergence (default 5%)",
+    )
+    ap.add_argument(
+        "--topn",
+        type=int,
+        default=20,
+        help="how many top byte values to score (default 20)",
+    )
     a = ap.parse_args()
 
     g_hist = hist(a.golden)
@@ -56,12 +67,13 @@ def main():
     print(f"fpga   : {f_total} bytes, {len(f_hist)} unique values")
 
     if g_total == 0 or f_total == 0:
-        print("ERROR: empty input"); sys.exit(2)
+        print("ERROR: empty input")
+        sys.exit(2)
 
     g_rel = rel(g_hist, g_total)
     f_rel = rel(f_hist, f_total)
 
-    top_bytes = sorted(g_hist, key=g_hist.get, reverse=True)[:a.topn]
+    top_bytes = sorted(g_hist, key=g_hist.get, reverse=True)[: a.topn]
     print(f"\ntop-{a.topn} bytes by GOLDEN frequency:")
     print(f"  byte  |  golden%   fpga%    diff       verdict")
     print(f"  ------+-----------------------------------------")
@@ -83,27 +95,35 @@ def main():
         gp = g_rel[b]
         fp = f_rel.get(b, 0.0)
         if gp > 1e-4 and fp < 1e-5:
-            print(f"  0x{b:02x}: golden={gp*100:.3f}%  fpga={fp*100:.5f}%   "
-                  "!! byte lost in FPGA path")
+            print(
+                f"  0x{b:02x}: golden={gp*100:.3f}%  fpga={fp*100:.5f}%   "
+                "!! byte lost in FPGA path"
+            )
             fail = True
 
     # Bytes present in fpga but not in golden -- most-likely TPIU sync residue
-    print(f"\nbytes >0.5% in fpga but not in golden (candidate TPIU residue "
-          "or FPGA-injected):")
+    print(
+        f"\nbytes >0.5% in fpga but not in golden (candidate TPIU residue "
+        "or FPGA-injected):"
+    )
     for b in sorted(f_hist, key=f_hist.get, reverse=True)[:10]:
         fp = f_rel[b]
         gp = g_rel.get(b, 0.0)
         if fp > 5e-3 and gp < 1e-5:
-            print(f"  0x{b:02x}: fpga={fp*100:.3f}%  golden={gp*100:.5f}%   "
-                  "!! byte injected on FPGA path (or TPIU deframer leaked)")
+            print(
+                f"  0x{b:02x}: fpga={fp*100:.3f}%  golden={gp*100:.5f}%   "
+                "!! byte injected on FPGA path (or TPIU deframer leaked)"
+            )
             fail = True
 
     print()
     if fail:
         print("VERDICT: FAIL  (histograms diverge; see rows tagged OUT OF TOL)")
         sys.exit(1)
-    print(f"VERDICT: PASS  (top-{a.topn} golden bytes all within {a.tol*100:.1f}% "
-          "relative deviation)")
+    print(
+        f"VERDICT: PASS  (top-{a.topn} golden bytes all within {a.tol*100:.1f}% "
+        "relative deviation)"
+    )
 
 
 if __name__ == "__main__":

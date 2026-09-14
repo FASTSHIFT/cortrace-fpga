@@ -8,6 +8,7 @@ This separates "decoder logic correctness" (provable here, 100%, no hardware)
 from "sampling chain correctness" (only checkable on board). Answers review
 r14's "how do you know the decode is real?" for the logic half.
 """
+
 import struct
 
 import etm35lib as L
@@ -31,11 +32,11 @@ def enc_isync(addr, thumb=True, reason=L.REASON_PERIODIC, nonsecure=False):
 
 def enc_phdr_fmt1(eatoms, natom=False):
     """Format-1 P-header (IHI0014Q §7.3.4): bit7=1, bit0=0, bit1=0,
-       bits[5:2]=eatoms, bit6=natom flag."""
+    bits[5:2]=eatoms, bit6=natom flag."""
     assert 0 <= eatoms <= 15
     c = 0x80 | ((eatoms & 0x0F) << 2)
     if natom:
-        c |= (1 << 6)
+        c |= 1 << 6
     return bytes([c])
 
 
@@ -48,7 +49,7 @@ def enc_branch_1byte(low7):
 # I-sync roundtrip: encode known PCs, decode, assert exact recovery
 # ----------------------------------------------------------------------------
 def test_isync_roundtrip_exact():
-    pcs = [0x08001234, 0x0800abcc, 0x08055000, 0x08000000]
+    pcs = [0x08001234, 0x0800ABCC, 0x08055000, 0x08000000]
     stream = bytearray()
     for pc in pcs:
         stream += enc_async()
@@ -59,8 +60,12 @@ def test_isync_roundtrip_exact():
 
 
 def test_isync_reason_codes_roundtrip():
-    for reason in (L.REASON_PERIODIC, L.REASON_TRACE_ON,
-                   L.REASON_OVERFLOW, L.REASON_DEBUG_EXIT):
+    for reason in (
+        L.REASON_PERIODIC,
+        L.REASON_TRACE_ON,
+        L.REASON_OVERFLOW,
+        L.REASON_DEBUG_EXIT,
+    ):
         pkt = enc_isync(0x08001000, reason=reason)
         s = L.parse_isync_at(pkt, 0)
         assert s is not None
@@ -98,7 +103,7 @@ def test_region_recovers_known_atom_sequence():
     stream = bytearray(enc_isync(pc))
     for e, n in seq:
         stream += enc_phdr_fmt1(e, n)
-    stream += bytes([0x00])    # async-ish stop
+    stream += bytes([0x00])  # async-ish stop
     events, _ = L.decode_region(bytes(stream), 6, pc)  # start after the 6-byte isync
     atoms = [(e.eatoms, e.natoms) for e in events if e.kind == "atoms"]
     assert atoms == [(e, 1 if n else 0) for e, n in seq]
@@ -108,7 +113,7 @@ def test_decode_all_recovers_exact_anchor_set_and_atoms():
     # Full pipeline: 3 anchors, each followed by known atoms. Assert exact.
     spec = [
         (0x08001000, [2, 4]),
-        (0x08020abc, [1, 3, 5]),
+        (0x08020ABC, [1, 3, 5]),
         (0x08000010, [0]),
     ]
     stream = bytearray()
@@ -129,12 +134,13 @@ def test_noise_does_not_fabricate_anchors():
     # flash addr + clean info) must yield zero anchors — guards the r14 BUG-1
     # false-positive concern on a controlled negative input.
     import random
+
     random.seed(1234)
     # random bytes but force every 0x08 to be followed by a non-flash addr
     data = bytearray(random.randbytes(4000))
     for i in range(len(data) - 5):
         if data[i] == 0x08:
-            data[i + 5] = 0x20    # addr high byte -> SRAM, not flash
+            data[i + 5] = 0x20  # addr high byte -> SRAM, not flash
     assert L.recover_pcs(bytes(data)) == []
 
 
@@ -157,11 +163,12 @@ def test_logic_analyzer_ground_truth_while_nop():
         data = open("/tmp/dsl_bytes_0.bin", "rb").read()
     else:
         import pytest
+
         pytest.skip("no while_nop fixture and no /tmp/dsl_bytes_0.bin")
     pcs = L.recover_pcs(data)
     # the while(1){__NOP();} loop NOP is at 0x08000ff0; it MUST be the dominant
     # I-sync anchor recovered from the physical pin capture.
-    assert 0x08000ff0 in pcs
+    assert 0x08000FF0 in pcs
     # all anchors must be valid flash code addresses
     for a in pcs:
         assert L.is_flash(a)

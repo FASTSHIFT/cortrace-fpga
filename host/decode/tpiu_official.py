@@ -15,6 +15,7 @@ reference without wiring up the orbuculum network pipeline.
 
 Usage: tpiu_official.py <raw_tpiu.bin> [want_stream=2] -> writes <in>.s<N>.bin
 """
+
 import sys
 
 SYNCPATTERN = 0xFFFFFF7F
@@ -117,7 +118,8 @@ def deframe(stream, want_stream=2, with_offsets=False):
             byte_count = 0
             if with_offsets:
                 pkt, pkt_off, cur_stream = _get_packet(
-                    rxed, want_stream, cur_stream, rxed_off)
+                    rxed, want_stream, cur_stream, rxed_off
+                )
                 out.extend(pkt)
                 out_off.extend(pkt_off)
             else:
@@ -137,7 +139,9 @@ def main():
     outp = f"{path}.s{want}.bin"
     open(outp, "wb").write(etm)
     # A-sync check
-    a = 0; zc = 0; ti = 0
+    a = 0
+    zc = 0
+    ti = 0
     for i, c in enumerate(etm):
         if c == 0:
             zc += 1
@@ -148,8 +152,10 @@ def main():
             zc = 0
         else:
             zc = 0
-    print(f"in={len(raw)} frames={stats['packets']} fsync={stats['syncs']} "
-          f"-> stream{want}={len(etm)} bytes")
+    print(
+        f"in={len(raw)} frames={stats['packets']} fsync={stats['syncs']} "
+        f"-> stream{want}={len(etm)} bytes"
+    )
     print(f"  ETMv4 A-sync={a}  trace-info-after(0x01)={ti}")
     print(f"  wrote {outp}")
 
