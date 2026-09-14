@@ -26,8 +26,13 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DECODE = os.path.join(HERE, "..", "decode")
-REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", "..", ".."))
-CORTRACE = os.path.join(REPO, "cortrace", "build", "cortrace-decode")
+# cortrace-fpga/host/scripts -> repo root (2 up) -> workspace (3 up). The
+# sibling cortrace + firmware repos live next to cortrace-fpga in the workspace.
+REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
+WORKSPACE = os.path.abspath(os.path.join(REPO, ".."))
+CORTRACE = os.environ.get(
+    "CORTRACE_DECODE",
+    os.path.join(WORKSPACE, "cortrace", "build", "cortrace-decode"))
 
 
 def async_bad_rate(etm_path):
@@ -88,7 +93,7 @@ def main():
 
     # build mem.bin + syms.nm from the ELF once
     elf = a.elf or os.path.join(
-        REPO, "stm32h743-etm-trace-firmware", "build", "H743_Blink.elf")
+        WORKSPACE, "stm32h743-etm-trace-firmware", "build", "H743_Blink.elf")
     mem = "/tmp/e2e_mem.bin"
     syms = "/tmp/e2e_syms.nm"
     subprocess.run(["arm-none-eabi-objcopy", "-O", "binary",
