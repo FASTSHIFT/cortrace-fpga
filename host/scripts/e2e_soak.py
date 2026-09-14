@@ -35,12 +35,12 @@ CORTRACE = os.environ.get(
 )
 
 
-def decode_segment(raw, mem, base, syms):
-    # One shot: cortrace-decode deframes the raw capture in-process (--raw,
-    # nibble reassemble + TPIU stream 2, ~60x faster than the old Python
-    # deframe_to_etm.py) and decodes it. No intermediate etm.bin.
+def decode_segment(raw, elf, syms):
+    # One shot: cortrace-decode deframes the raw capture in-process (--raw) and
+    # decodes it, reading program memory straight from the ELF (--elf) so there
+    # is no mem.bin layout mismatch. No intermediate etm.bin.
     c = subprocess.run(
-        [CORTRACE, raw, mem, base, syms, "--raw"], capture_output=True, text=True
+        [CORTRACE, raw, syms, "--elf", elf, "--raw"], capture_output=True, text=True
     )
     out = c.stderr + c.stdout
 
@@ -83,39 +83,16 @@ def main():
     ap.add_argument("--tmp", default="/tmp/e2e_seg.bin")
     a = ap.parse_args()
 
-    # build mem.bin + syms.nm from the ELF once
+    # Program memory is read straight from the ELF by cortrace-decode --elf
+    # (no objcopy/mem.bin -- that flat binary mis-laid-out .data and caused
+    # decode corruption). Only the symbol table is generated here.
     elf = a.elf or os.path.join(
         WORKSPACE, "stm32h743-etm-trace-firmware", "build", "H743_Blink.elf"
     )
-    mem = "/tmp/e2e_mem.bin"
     syms = "/tmp/e2e_syms.nm"
-    subprocess.run(
-        [
-            "arm-none-eabi-objcopy",
-            "-O",
-            "binary",
-            "-j",
-            ".isr_vector",
-            "-j",
-            ".text",
-            "-j",
-            ".rodata",
-            "-j",
-            ".ARM",
-            "-j",
-            ".init_array",
-            "-j",
-            ".fini_array",
-            "-j",
-            ".data",
-            elf,
-            mem,
-        ],
-        check=True,
-    )
     with open(syms, "w") as f:
         subprocess.run(["arm-none-eabi-nm", "-n", elf], stdout=f, check=True)
-    print(f"ELF={elf}  mem={os.path.getsize(mem)}B")
+    print(f"ELF={elf}")
 
     grab = os.path.join(HERE, "stream_grab")
     t0 = time.time()
@@ -134,7 +111,7 @@ def main():
         grab_ok = (
             "seq-gap events=0" in g.stdout and "ring-full dropped bytes=0" in g.stdout
         )
-        res = decode_segment(a.tmp, mem, "08000000", syms)
+        res = decode_segment(a.tmp, elf, syms)
         el = time.time() - t0
         if not res.get("balanced") is None:
             tot_proc += res.get("proc") or 0

@@ -39,8 +39,8 @@ DEFAULT_ELF = os.path.join(
 )
 
 
-def derive_tsgen_hz():
-    """Read the live clock tree over the DAP; return hclk (= TSGEN freq)."""
+def derive_clocks():
+    """Read the live clock tree over the DAP; return (tsgen_hz, sysclk_hz)."""
     import json
 
     out = subprocess.run(
@@ -50,15 +50,19 @@ def derive_tsgen_hz():
     )
     if out.returncode != 0:
         raise SystemExit("clock_probe failed:\n" + out.stderr)
-    return json.loads(out.stdout)["tsgen_hz"]
+    d = json.loads(out.stdout)
+    return d["tsgen_hz"], d["sysclk_hz"]
 
 
-def build_mem_syms(elf):
-    mem, syms = "/tmp/pt_mem.bin", "/tmp/pt_syms.nm"
-    subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", elf, mem], check=True)
+def build_syms(elf):
+    # Program memory now comes straight from the ELF (cortrace-decode --elf),
+    # so there is no mem.bin / objcopy step -- that flat binary silently
+    # mis-laid-out gapped/.data images and caused decode corruption. Only the
+    # symbol table (nm) is still generated here.
+    syms = "/tmp/pt_syms.nm"
     with open(syms, "w") as f:
         subprocess.run(["arm-none-eabi-nm", "-n", elf], stdout=f, check=True)
-    return mem, syms
+    return syms
 
 
 def num(pat, text):
@@ -75,16 +79,30 @@ def main():
     ap.add_argument(
         "--tsgen-hz", type=float, default=None, help="override; else DAP-derived"
     )
+    ap.add_argument(
+        "--sysclk-hz", type=float, default=None, help="override; else DAP-derived"
+    )
+    ap.add_argument(
+        "--time-base",
+        choices=("cycle", "etm"),
+        default="cycle",
+        help="cycle = CPU-cycle count (fine, needs firmware cc=1); "
+        "etm = global timestamp anchors (coarse). default cycle",
+    )
     ap.add_argument("--systick", dest="systick", action="store_true", default=True)
     ap.add_argument("--no-systick", dest="systick", action="store_false")
     ap.add_argument("--phase", default="1,0")
     a = ap.parse_args()
 
     os.makedirs(PERFTRACE_DIR, exist_ok=True)
-    tsgen_hz = a.tsgen_hz if a.tsgen_hz else derive_tsgen_hz()
-    print(f"TSGEN = {tsgen_hz/1e6:.3f} MHz")
+    tsgen_hz, sysclk_hz = derive_clocks()
+    if a.tsgen_hz:
+        tsgen_hz = a.tsgen_hz
+    if a.sysclk_hz:
+        sysclk_hz = a.sysclk_hz
+    print(f"TSGEN = {tsgen_hz/1e6:.3f} MHz  sysclk = {sysclk_hz/1e6:.3f} MHz")
 
-    mem, syms = build_mem_syms(a.elf)
+    syms = build_syms(a.elf)
     raw = f"/tmp/pt_{a.name}.bin"
     perf = os.path.join(PERFTRACE_DIR, f"{a.name}.perftrace")
 
@@ -92,23 +110,15 @@ def main():
     grab = os.path.join(HERE, "stream_grab")
     subprocess.run([grab, a.iface, str(a.seconds), raw, "256", "512"], check=True)
 
-    # decode onto the ETM execution time base
+    # decode with the chosen time base (memory read straight from the ELF)
+    if a.time_base == "cycle":
+        base_args = ["--cycle-time", "--sysclk-hz", str(sysclk_hz)]
+    else:
+        base_args = ["--etm-time", "--tsgen-hz", str(tsgen_hz)]
     c = subprocess.run(
-        [
-            CORTRACE,
-            raw,
-            mem,
-            "08000000",
-            syms,
-            "--raw",
-            "--phase",
-            a.phase,
-            "--etm-time",
-            "--tsgen-hz",
-            str(tsgen_hz),
-            "--perf",
-            perf,
-        ],
+        [CORTRACE, raw, syms, "--elf", a.elf, "--raw", "--phase", a.phase]
+        + base_args
+        + ["--perf", perf],
         capture_output=True,
         text=True,
     )

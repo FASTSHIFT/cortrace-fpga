@@ -99,25 +99,16 @@ def flash_firmware(elf_hex: Path):
         )
 
 
-def prepare_reference(build_dir: Path, out_mem: Path, out_nm: Path) -> Path:
-    """Extract mem.bin + syms.nm from H743_Blink.elf."""
+def prepare_reference(build_dir: Path, out_nm: Path) -> Path:
+    """Emit syms.nm from H743_Blink.elf. Program memory is read from the ELF
+    directly by cortrace-decode --elf (no mem.bin: objcopy -O binary mislays
+    gapped/.data images)."""
     elf = build_dir / "H743_Blink.elf"
     if not elf.exists():
         raise SystemExit(f"missing firmware ELF: {elf}")
-    run(
-        [
-            "arm-none-eabi-objcopy",
-            "-O",
-            "binary",
-            "--only-section=.isr_vector",
-            "--only-section=.text",
-            "--only-section=.rodata",
-            str(elf),
-            str(out_mem),
-        ]
-    )
     with open(out_nm, "w") as f:
         subprocess.run(["arm-none-eabi-nm", "-n", str(elf)], check=True, stdout=f)
+    return elf
     return elf
 
 
@@ -238,7 +229,7 @@ def deframe_fpga(raw: Path, keep_dir: Path) -> Path:
 
 def cortrace(
     etm: Path,
-    mem: Path,
+    elf: Path,
     syms: Path,
     out_events: Path,
     out_perf: Path,
@@ -252,9 +243,9 @@ def cortrace(
     cmd = [
         str(CORTRACE_BIN),
         str(etm),
-        str(mem),
-        "08000000",
         str(syms),
+        "--elf",
+        str(elf),
         "--strict",
         "--events",
         str(out_events),
@@ -364,12 +355,10 @@ def main():
     ref_dir = logs / f"_ref_{a.tag}"
     ref_dir.mkdir(exist_ok=True)
 
-    # 0) reference mem.bin + syms.nm from the SAME elf the target is running
-    elf = prepare_reference(FW_REPO / "build", ref_dir / "mem.bin", ref_dir / "syms.nm")
-    print(
-        f"[ref] elf={elf}  mem={ref_dir/'mem.bin'}  syms={ref_dir/'syms.nm'}",
-        flush=True,
-    )
+    # 0) reference syms.nm from the SAME elf the target is running (memory read
+    # from the ELF directly by cortrace-decode --elf)
+    elf = prepare_reference(FW_REPO / "build", ref_dir / "syms.nm")
+    print(f"[ref] elf={elf}  syms={ref_dir/'syms.nm'}", flush=True)
 
     # 1) optional flash
     if a.flash:
@@ -416,10 +405,10 @@ def main():
     print(f"[fpga.etm] {fpga_etm_link.stat().st_size}B -> {fpga_etm_link}", flush=True)
 
     # 6) cortrace on both
-    mem, syms = ref_dir / "mem.bin", ref_dir / "syms.nm"
+    syms = ref_dir / "syms.nm"
     r_golden = cortrace(
         golden_bin,
-        mem,
+        elf,
         syms,
         logs / f"golden_{a.tag}.events",
         perftrace / f"golden_{a.tag}.perftrace",
@@ -428,7 +417,7 @@ def main():
     )
     r_fpga = cortrace(
         fpga_etm_link,
-        mem,
+        elf,
         syms,
         logs / f"fpga_{a.tag}.events",
         perftrace / f"fpga_{a.tag}.perftrace",
