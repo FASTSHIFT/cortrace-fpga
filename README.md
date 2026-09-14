@@ -5,13 +5,29 @@
 一个基于 Artix-7 FPGA 的采集设备，用于抓取 Cortex-M 的**并口 ETM trace**，
 并通过千兆 UDP 把原始字节流送给 [cortrace](https://github.com/FASTSHIFT/cortrace) 解码。
 
-```
-STM32H743 ETM 4-bit ──▶ trace_capture_a7（IDDR 边沿采样，无 IDELAY）
-                    ──▶ la_ddr_writer（乒乓打包 128b）
-                    ──▶ DDR3 环形缓冲（16 MB）
-                    ──▶ la_ddr_ring_streamer（位宽转换 128b→8b）
-                    ──▶ 打包器 + fpga_core_net ──▶ UDP :5555 ──▶ 主机
-                    ──▶ stream_grab ──▶ deframe ──▶ cortrace（解码）
+```mermaid
+flowchart TD
+    ETM["STM32H743 ETM 4-bit"] --> CAP["trace_capture_a7<br/>IDDR 边沿采样，无 IDELAY"]
+    CAP --> WR["la_ddr_writer<br/>乒乓打包 128b"]
+    WR --> RING["DDR3 环形缓冲 16 MB"]
+    RING --> STR["la_ddr_ring_streamer<br/>位宽转换 128b→8b"]
+    STR --> NET["打包器 + fpga_core_net"]
+    NET -->|"UDP :5555"| GRAB["stream_grab"]
+    GRAB --> DEFRAME["deframe"]
+    DEFRAME --> CORTRACE["cortrace 解码"]
+
+    subgraph FPGA["FPGA（Artix-7）"]
+        CAP
+        WR
+        RING
+        STR
+        NET
+    end
+    subgraph HOST["主机"]
+        GRAB
+        DEFRAME
+        CORTRACE
+    end
 ```
 
 采集链路做到字节级无损：经过帧化 PRBS 压测（6.75 GB / 82.3 万块，0 字节错误）

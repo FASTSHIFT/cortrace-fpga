@@ -5,13 +5,29 @@
 An Artix-7 FPGA appliance that captures a Cortex-M **parallel ETM trace** port
 and streams it over gigabit UDP for [cortrace](https://github.com/FASTSHIFT/cortrace) to decode.
 
-```
-STM32H743 ETM 4-bit ──▶ trace_capture_a7 (IDDR edge sample, no IDELAY)
-                    ──▶ la_ddr_writer (ping-pong pack 128b)
-                    ──▶ DDR3 ring (16 MB)
-                    ──▶ la_ddr_ring_streamer (gearbox 128b→8b)
-                    ──▶ packetiser + fpga_core_net ──▶ UDP :5555 ──▶ host
-                    ──▶ stream_grab ──▶ deframe ──▶ cortrace (decode)
+```mermaid
+flowchart TD
+    ETM["STM32H743 ETM 4-bit"] --> CAP["trace_capture_a7<br/>IDDR edge sample, no IDELAY"]
+    CAP --> WR["la_ddr_writer<br/>ping-pong pack 128b"]
+    WR --> RING["DDR3 ring 16 MB"]
+    RING --> STR["la_ddr_ring_streamer<br/>gearbox 128b→8b"]
+    STR --> NET["packetiser + fpga_core_net"]
+    NET -->|"UDP :5555"| GRAB["stream_grab"]
+    GRAB --> DEFRAME["deframe"]
+    DEFRAME --> CORTRACE["cortrace decode"]
+
+    subgraph FPGA["FPGA (Artix-7)"]
+        CAP
+        WR
+        RING
+        STR
+        NET
+    end
+    subgraph HOST["Host"]
+        GRAB
+        DEFRAME
+        CORTRACE
+    end
 ```
 
 The capture chain is byte-perfect: verified with a framed-PRBS soak
