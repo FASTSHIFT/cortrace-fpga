@@ -2,6 +2,7 @@ name: ci
 
 on:
   push:
+    branches: [main, master]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -11,6 +12,7 @@ on:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
+  workflow_dispatch:
 
 jobs:
   sim:
