@@ -43,7 +43,7 @@ stack, SysTick exceptions rendered) across BB=0/1 and SysTick on/off.
 | `rtl/ddr3/ip/` | Xilinx MIG DDR3 + clocking wizard IP (`.xci`, Vivado 2021.1) |
 | `rtl/external/verilog-ethernet` | Alex Forencich MAC/UDP/IP/ARP + AXIS (submodule) |
 | `fpga_flow/` | Vivado build TCL (`build_trace_stream.tcl`) |
-| `host/decode/` | Deframe front-end feeding cortrace (etm35lib, tpiu_official, deframe_to_etm, make_timebase) |
+| `host/decode/` | Deframe helpers + host-side phase search (etm35lib, tpiu_official, recover, make_timebase) |
 | `host/scripts/` | Capture (`stream_grab`), CSR control (`trace_ctrl`), PRBS/e2e soak, golden cross-check |
 | `host/target/` | OpenOCD configs for the STM32H743 target |
 | `sim/` | Icarus Verilog manifest regression (`run_verilog_tests.py`) |
@@ -64,8 +64,9 @@ vivado -mode batch -source ../fpga_flow/build_trace_stream.tcl
 sudo setcap 'cap_net_raw,cap_net_admin+ep' host/scripts/stream_grab
 
 host/scripts/stream_grab <iface> <secs> cap.bin 256 512
-python3 host/decode/deframe_to_etm.py cap.bin etm.bin
-cortrace-decode etm.bin mem.bin 08000000 syms.nm --perf out.perftrace
+# cortrace-decode --raw deframes the capture in-process (nibble reassemble +
+# TPIU stream 2), so no separate deframe step is needed.
+cortrace-decode cap.bin mem.bin 08000000 syms.nm --raw --perf out.perftrace
 ```
 
 ## Test

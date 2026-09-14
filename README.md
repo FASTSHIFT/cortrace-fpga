@@ -42,7 +42,7 @@ flowchart TD
 | `rtl/ddr3/ip/` | Xilinx MIG DDR3 + 时钟向导 IP（`.xci`，Vivado 2021.1） |
 | `rtl/external/verilog-ethernet` | Alex Forencich 的 MAC/UDP/IP/ARP + AXIS（子模块） |
 | `fpga_flow/` | Vivado 构建 TCL（`build_trace_stream.tcl`） |
-| `host/decode/` | 送入 cortrace 前的 deframe 前端（etm35lib、tpiu_official、deframe_to_etm、make_timebase） |
+| `host/decode/` | deframe 辅助 + 主机侧相位搜索（etm35lib、tpiu_official、recover、make_timebase） |
 | `host/scripts/` | 采集（`stream_grab`）、CSR 控制（`trace_ctrl`）、PRBS/端到端压测、golden 对拍 |
 | `host/target/` | STM32H743 目标板的 OpenOCD 配置 |
 | `sim/` | Icarus Verilog manifest 回归（`run_verilog_tests.py`） |
@@ -63,8 +63,9 @@ vivado -mode batch -source ../fpga_flow/build_trace_stream.tcl
 sudo setcap 'cap_net_raw,cap_net_admin+ep' host/scripts/stream_grab
 
 host/scripts/stream_grab <网卡> <秒数> cap.bin 256 512
-python3 host/decode/deframe_to_etm.py cap.bin etm.bin
-cortrace-decode etm.bin mem.bin 08000000 syms.nm --perf out.perftrace
+# cortrace-decode --raw 在进程内完成 deframe（nibble 重组 + TPIU stream 2），
+# 无需单独的 deframe 步骤。
+cortrace-decode cap.bin mem.bin 08000000 syms.nm --raw --perf out.perftrace
 ```
 
 ## 测试

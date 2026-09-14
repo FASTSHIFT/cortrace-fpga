@@ -14,7 +14,7 @@
 # On the board:
 #   1. Program the .bit (openFPGALoader -c ft232 --fpga-part xc7a35tfgg484 [-f])
 #   2. Host NIC .245 up; stream_grab captures the UDP stream
-#   3. Feed the payload to host/decode/deframe_to_etm.py then cortrace-decode
+#   3. Feed the payload to cortrace-decode --raw (deframes in-process)
 
 set part      xc7a35tfgg484-2
 set bdir      [file dirname [info script]]

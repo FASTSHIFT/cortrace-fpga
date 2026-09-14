@@ -26,7 +26,6 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DECODE = os.path.join(HERE, "..", "decode")
 # cortrace-fpga/host/scripts -> repo root (2 up) -> workspace (3 up). The
 # sibling cortrace + firmware repos live next to cortrace-fpga in the workspace.
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -36,41 +35,13 @@ CORTRACE = os.environ.get(
 )
 
 
-def async_bad_rate(etm_path):
-    b = open(etm_path, "rb").read()
-    good = bad = zc = 0
-    for c in b:
-        if c == 0:
-            zc += 1
-        else:
-            if c == 0x80 and zc >= 1:
-                if zc >= 11:
-                    good += 1
-                else:
-                    bad += 1
-            zc = 0
-    tot = good + bad
-    return bad, tot
-
-
-def decode_segment(raw, etm, mem, base, syms):
-    # deframe
-    r = subprocess.run(
-        [
-            sys.executable,
-            os.path.join(DECODE, "deframe_to_etm.py"),
-            raw,
-            etm,
-            "40000000",
-        ],
-        capture_output=True,
-        text=True,
+def decode_segment(raw, mem, base, syms):
+    # One shot: cortrace-decode deframes the raw capture in-process (--raw,
+    # nibble reassemble + TPIU stream 2, ~60x faster than the old Python
+    # deframe_to_etm.py) and decodes it. No intermediate etm.bin.
+    c = subprocess.run(
+        [CORTRACE, raw, mem, base, syms, "--raw"], capture_output=True, text=True
     )
-    if r.returncode != 0:
-        return dict(ok=False, why="deframe failed: " + r.stderr[-200:])
-    bad, tot = async_bad_rate(etm)
-    # cortrace decode
-    c = subprocess.run([CORTRACE, etm, mem, base, syms], capture_output=True, text=True)
     out = c.stderr + c.stdout
 
     def num(pat):
@@ -84,8 +55,11 @@ def decode_segment(raw, etm, mem, base, syms):
     mism = num(r"mismatched returns\s*:\s*(\d+)")
     exc = num(r"exceptions rendered\s*:\s*(\d+)")
     proc = num(r"etm bytes processed\s*:\s*(\d+)")
+    # cortrace's --raw prints "A-syncs=N" from the deframe front end; a healthy
+    # deframe has a nonzero A-sync count (the whole-chain-aligned signal).
+    asyncs = num(r"A-syncs=(\d+)")
     balanced = begins is not None and begins == ends
-    ok = not fatal and balanced and dropped == 0 and bad == 0
+    ok = not fatal and balanced and dropped == 0 and (asyncs or 0) > 0
     return dict(
         ok=ok,
         fatal=fatal,
@@ -95,8 +69,7 @@ def decode_segment(raw, etm, mem, base, syms):
         mism=mism,
         exc=exc,
         proc=proc,
-        async_bad=bad,
-        async_tot=tot,
+        asyncs=asyncs,
     )
 
 
@@ -145,7 +118,6 @@ def main():
     print(f"ELF={elf}  mem={os.path.getsize(mem)}B")
 
     grab = os.path.join(HERE, "stream_grab")
-    etm = "/tmp/e2e_etm.bin"
     t0 = time.time()
     t_end = t0 + a.minutes * 60
     seg = 0
@@ -162,7 +134,7 @@ def main():
         grab_ok = (
             "seq-gap events=0" in g.stdout and "ring-full dropped bytes=0" in g.stdout
         )
-        res = decode_segment(a.tmp, etm, mem, "08000000", syms)
+        res = decode_segment(a.tmp, mem, "08000000", syms)
         el = time.time() - t0
         if not res.get("balanced") is None:
             tot_proc += res.get("proc") or 0
@@ -172,7 +144,7 @@ def main():
             f"[{el:6.1f}s] seg{seg:03d} proc={res.get('proc')} "
             f"bal={res.get('balanced')} drop={res.get('dropped')} "
             f"mism={res.get('mism')} exc={res.get('exc')} "
-            f"async_bad={res.get('async_bad')}/{res.get('async_tot')} "
+            f"asyncs={res.get('asyncs')} "
             f"grab={'ok' if grab_ok else 'GAP'} -> "
             f"{'OK' if (res['ok'] and grab_ok) else 'FAIL'}",
             flush=True,
@@ -193,7 +165,7 @@ def main():
     print(
         "  VERDICT: "
         + (
-            "PASS — every segment fully decoded, balanced, " "0 dropped, 0 bad A-sync"
+            "PASS — every segment fully decoded, balanced, 0 dropped"
             if rc == 0
             else "FAIL"
         )

@@ -26,17 +26,25 @@ PY
 sleep 0.5
 sudo pkill -9 -x stream_grab 2>/dev/null; sudo fuser -k 5555/udp 2>/dev/null; sleep 1
 sudo "$HERE/stream_grab" "$NIC" 2 "$OUT" 256 512 2>&1 | grep -E "seq-gap|written"
-python3 "$HERE/../decode/deframe_to_etm.py" "$OUT" "$ETM" 40000000 2>&1 | tail -1
-python3 - "$ETM" "$TAG" <<'PY'
+# Deframe + A-sync health via the shared recover module (same phase search the
+# C++ cortrace-decode --raw uses). No intermediate file, no slow trc_pkt_lister.
+python3 - "$OUT" "$TAG" "$HERE/../decode" <<'PY'
 import sys
-b=open(sys.argv[1],'rb').read()
-good=bad=zc=0
-for c in b:
-    if c==0: zc+=1
+sys.path.insert(0, sys.argv[3])
+import recover as R
+import tpiu_official as T
+raw = open(sys.argv[1], "rb").read(40_000_000)
+_, parity, order, data, _, _, _ = R.recover_assemble(raw)
+etm, _ = T.deframe(data, want_stream=2)
+good = bad = zc = 0
+for c in etm:
+    if c == 0:
+        zc += 1
     else:
-        if c==0x80 and zc>=1:
-            good+=(zc>=11); bad+=(zc<11)
-        zc=0
-tot=good+bad
-print(f"[{sys.argv[2]}] etm={len(b)}B  good-async={good} bad-async={bad} bad%={100*bad/max(1,tot):.2f}%")
+        if c == 0x80 and zc >= 1:
+            good += (zc >= 11); bad += (zc < 11)
+        zc = 0
+tot = good + bad
+print(f"[{sys.argv[2]}] etm={len(etm)}B parity={parity} order={order} "
+      f"good-async={good} bad-async={bad} bad%={100*bad/max(1,tot):.2f}%")
 PY

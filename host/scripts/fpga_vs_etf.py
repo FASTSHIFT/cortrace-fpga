@@ -199,7 +199,7 @@ def deframe_fpga(raw: Path, keep_dir: Path) -> Path:
     nibble->frame->stream chain is aligned)."""
     keep_dir.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, str(BRINGUP / "decode"))
-    import opencsd_etm4_run as OC
+    import recover as OC
     import tpiu_official as T
     import etm35lib as L
 
