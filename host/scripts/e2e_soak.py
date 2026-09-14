@@ -30,9 +30,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # sibling cortrace + firmware repos live next to cortrace-fpga in the workspace.
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 WORKSPACE = os.path.abspath(os.path.join(REPO, ".."))
-CORTRACE = os.environ.get(
-    "CORTRACE_DECODE", os.path.join(WORKSPACE, "cortrace", "build", "cortrace-decode")
-)
+
+
+def _default_cortrace():
+    # Prefer the Release build (OpenCSD decode is ~5x faster than Debug).
+    rel = os.path.join(WORKSPACE, "cortrace", "build-rel", "cortrace-decode")
+    dbg = os.path.join(WORKSPACE, "cortrace", "build", "cortrace-decode")
+    return rel if os.path.exists(rel) else dbg
+
+
+CORTRACE = os.environ.get("CORTRACE_DECODE", _default_cortrace())
 
 
 def decode_segment(raw, elf, syms):

@@ -31,9 +31,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 WORKSPACE = os.path.abspath(os.path.join(REPO, ".."))
 PERFTRACE_DIR = os.path.join(WORKSPACE, "perftrace")
-CORTRACE = os.environ.get(
-    "CORTRACE_DECODE", os.path.join(WORKSPACE, "cortrace", "build", "cortrace-decode")
-)
+
+
+def _default_cortrace():
+    # Prefer the Release build (OpenCSD decode is ~5x faster than Debug).
+    rel = os.path.join(WORKSPACE, "cortrace", "build-rel", "cortrace-decode")
+    dbg = os.path.join(WORKSPACE, "cortrace", "build", "cortrace-decode")
+    return rel if os.path.exists(rel) else dbg
+
+
+CORTRACE = os.environ.get("CORTRACE_DECODE", _default_cortrace())
 DEFAULT_ELF = os.path.join(
     WORKSPACE, "stm32h743-etm-trace-firmware", "build", "H743_Blink.elf"
 )
