@@ -490,3 +490,54 @@ stream 1 是刚性周期重复 `88 7a c0 ff`，几百字节零变化——既不
 
 §9 路线状态：**P0 部分达成**（ETM 多流采集 + 干净解码验证；DWT 数据值包待解）；
 P1 deframe 多流改造需连带修 §11.3(1) 的 ID1 重构问题。
+
+### 11.4 裸机对照实验：排除 NuttX，锁定为架构/路由问题（2026-09-15）
+
+为排除 NuttX 干扰，把裸机固件 boot 默认改成 `WL_SELFTRACE + dwt=1`：固件**冷启动
+自己 arm DWT 比较器**（watch `g_dwt_probe`，每次迭代写递增值），**全程无 openocd、
+无 NuttX、无 CLI**，配置完全可控。
+
+结果（`stream_grab` 2s，纯固件）：stream 1 **仍然只有 `c0 ff 88 7a`（255/136/122/192
+各 150 个），0 个 `0x8F` 数据值包**。ITM_TCR 读回 `0x0001000f` 证明固件的 DWT+ITM
+配置块确实执行了（这正是 `ITM_TCR_DWT_ATB` 的值），ITM 转发已开。
+
+**结论（决定性）：不是 NuttX 问题，也不是 arm 时序问题。** 固件明确跑了和 SWO 参考
+完全相同的 DWT(FUNCTION=0x0D)+ITM(TXENA) 序列，ITM 时间戳能到并口 TPIU，但 DWT
+**数据值包就是不出来**。SWO 参考能成功的差别在于：它走 **SWTF（SWO trace funnel，
+`0x5C004000`）+ formatter OFF**；而并口走 **CSTF（`0x5C013000`）→ ETF → TPIU +
+formatter ON**——**两个不同的 funnel**。
+
+强烈指向：**STM32H743 上 CM7 的 DWT/ITM 数据值包只接到 SWO 的 SWTF，没有接到并口这条
+CSTF/ETF 路径**（时间戳/同步包能过，是因为它们由 ITM 在另一处生成，或 formatter 自身
+产生；而 DWT 数据 trace 载荷没有被路由过来）。这是芯片 trace 互联的拓扑限制，非配置错误。
+
+### 11.5 数据手册核查：并口路径存在，无需加线（2026-09-15）
+
+查 RM0433 §60（debug infrastructure）+ ARMv7-M ARM（DDI0403E）确认拓扑，**结论有利**：
+
+- **RM0433 §60.5**：`CSTF` 有两个 ATB slave 口，**S0 = Cortex-M7 ETM，S1 = Cortex-M7 ITM**。
+  `ETF` 明确"captures trace data from two trace sources, namely the ETM and ITM"。
+  还有一个 **trace bus replicator**"branches the trace bus from the CPU's ITM
+  CoreSight component to **ETF and SWO**"——即 ITM/DWT **同时**送到 ETF（→并口 TPIU）
+  和 SWO。**所以 DWT/ITM 到并口 TPIU 的物理路径存在，不用加线。**
+- **ARMv7-M**：`DWT_CTRL.NOTRCPKT`（bit24）上板读 = 0 → DWT **支持** trace 包（不是
+  UNPREDICTABLE 情形）；`NUMCOMP`=4；FUNCTION=0x0D（数据值写包）编码正确。ITM
+  转发（TXENA）已开、时间戳能到并口——证明 S1(ITM)→ETF→TPIU 这条 ATB 通。
+
+**矛盾收窄**：路径存在、DWT 硬件支持、配置正确、ITM 时间戳能过并口，但 DWT **数据值
+包**就是不过。与 SWO 参考的唯一结构差异是 **SWO 走 SWTF + formatter OFF**，并口走
+**CSTF→ETF + formatter ON**。剩余嫌疑（按可能性）：
+
+1. **CSTF 仲裁优先级**：S0(ETM) 与 S1(ITM) 的 `PRIPORT` 优先级。手册明确"高优先级应给
+   数据量小的源"。若 ETM(S0) 优先级 ≥ ITM(S1)，ETM firehose 会饿死 ITM 的 DWT 数据包
+   （而周期性时间戳恰好在 ETM 间隙挤出来）。**下一步试：抬高 S1 优先级 / 压低 ETM 产量
+   （已 WFI idle）后看 DWT 包是否出现。**
+2. **ETF/replicator 对 ITM 数据包的处理**：replicator 或 ETF 在 formatter-on 下可能只
+   放行部分 ITM 包类型。
+3. **我的 C++ deframe 对 ID1(稀疏 ITM)流的重构**：仍未用参考 python deframer 对拍排除。
+
+**无需加线的两条路线**（路径已确认存在）：
+- **首选**：坐实并解决 §11.5(1) 的 CSTF 优先级/仲裁 或 deframe(3)，让 DWT 数据包经并口
+  出来——这样 ETM+DWT 同流同时间戳，方案最干净。
+- **备选（若并口 DWT 最终不通）**：DWT 走 SWO 单线（**复用一根已有的 SWO/PB3，不是并口
+  加线**），ETM 走并口，主机侧 cycle-count 对齐。
