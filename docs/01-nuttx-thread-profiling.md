@@ -536,8 +536,37 @@ CSTF/ETF 路径**（时间戳/同步包能过，是因为它们由 ITM 在另一
    放行部分 ITM 包类型。
 3. **我的 C++ deframe 对 ID1(稀疏 ITM)流的重构**：仍未用参考 python deframer 对拍排除。
 
-**无需加线的两条路线**（路径已确认存在）：
-- **首选**：坐实并解决 §11.5(1) 的 CSTF 优先级/仲裁 或 deframe(3)，让 DWT 数据包经并口
-  出来——这样 ETM+DWT 同流同时间戳，方案最干净。
-- **备选（若并口 DWT 最终不通）**：DWT 走 SWO 单线（**复用一根已有的 SWO/PB3，不是并口
-  加线**），ETM 走并口，主机侧 cycle-count 对齐。
+### 11.6 决定性实验：DWT 数据值包不经并口 TPIU（2026-09-15，已定论）
+
+用**串口自回读**破了 openocd 清 DWT 的死结：固件 arm DWT 后从 UART 打印自己锁存的
+寄存器（CPU 自读，openocd 没机会清）。实测（裸机，`board.sh uart-reset`）：
+
+```
+[dwt] CTRL=0x40000001 COMP0=0x20000400 MASK0=0 FUNC0=0x0100000d ITM_TCR=0x0001000f
+```
+
+`FUNC0=0x0100000d` → bit24 MATCHED **置位**：**DWT 确实 arm 成功且正在命中**。固件侧
+100% 正常，彻底排除"固件配置/arm 时序"嫌疑。
+
+再做隔离实验：**ETM 完全关掉**（`TRCPRGCTLR=0`）、只留 DWT+ITM，消除 ETM firehose
+与 ETF 溢出。抓取（`board.sh grab`）：stream 2 = 0 字节（ETM 确已关），**stream 1 仍
+然 0 个 `0x8F` 数据值包**，只有周期 `c0 ff 88 7a`（ITM 本地时间戳，301 字节）。
+
+**结论（airtight）：STM32H743 上 DWT 数据值包不经并口 TPIU（CSTF→ETF）路径**——
+即便 ETM 全关、DWT 确认 arm 且命中，数据值包也到不了并口线上；只有 ITM 本地时间戳
+能过。DWT 命中会触发一个时间戳（所以 `c0 ff 88 7a` 出现），但**数据值 payload 本身
+在上线前被丢弃**。RM0433 说 replicator 把 ITM 分叉到 ETF+SWO，但经验上 **DWT 数据
+trace 这一类包只走到 SWO/SWTF 分支，没进 ETF/并口分支**（ETF 在 HW-FIFO 模式或 M7
+trace 互联只把 timestamp/指令类包送 ETF）。
+
+**最终方案（不加并口线）：**
+- **DWT 线程切换走 SWO 单线**（SWTF，`orbtrace/.../h743-dwt-thread-trace` 已实测能出
+  `0x8F` TCB 指针包，DAPLink 即可，**复用已有 SWO/PB3，非并口加线**）。
+- **ETM 指令流 + callstack 走并口**（CSTF/ETF/TPIU，本轮已在 NuttX 上验证干净）。
+- 主机侧 cortrace 用 ETM cycle-count / 全局时间戳把两路对齐（周期级）。牺牲"同一物理
+  流"，但两路都确定可用，且零额外并口引脚。
+- **备选（纯并口、零 SWO）**：只用 ETM 侧推断线程切换（exception/PC + 调度器函数进入
+  点），nxtrace 逻辑更复杂但一根线不加。
+
+§9 路线更新：P0 定论——DWT 走并口此芯片不可行，改 SWO 旁路；P1+ 的 nxtrace 按
+"ETM(并口) + DWT(SWO) 双出口 + 主机对齐"设计。
