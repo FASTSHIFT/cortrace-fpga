@@ -428,3 +428,65 @@ TCB 字段偏移（DWARF，`gdb-multiarch`）：pid@0x30 · sched_priority@0x34 
 entry@0x3C · task_state@0x40 · flags@0x44 · sizeof=168 · **无 name 字段**。
 
 ELF：ARM EABI5、hard-float、含完整 `.debug_info`/`.debug_str`/`.debug_line`。
+
+---
+
+## 11. 上板进展（P0/P5，2026-09-15）
+
+按 §9 路线上板推进，记录实测结论与踩坑。**ETM 指令流链路已在 NuttX 上端到端
+跑通；DWT 线程切换数据包发射尚未解决**（一个孤立的 deframe/发射问题）。
+
+### 11.1 已验证（上板实测）
+
+- **主频降到 150MHz**（寄存器实证：`RCC_PLL1DIVR=0x05030677` → N=120/P=4/R=6，
+  VCO 600、sysclk 150、TRACECLKIN 100 → TRACECK 引脚 50MHz；`RCC_PLLCKSELR` M=5）。
+  HCLK 75MHz，与裸机操作点一致。改动只在 `board.h`（N/P/R 三个数），采集侧不变，
+  仅 decode 的 `--sysclk-hz` 从 400M 改 150M。
+- **WFI idle 是关键**。NuttX 通用 `arm_idle.c` 的 WFI 被 `#if 0` 注释，idle 任务
+  空转被 ETM 全量记录：一次 3s 抓取里 `nx_start` 有约 **1680 万条指令段**，打满
+  50MB/s 端口、溢出 ETF（opencsd 中途 fatal）。加 board 自定义 `up_idle`（WFI，
+  经 `CONFIG_ARCH_IDLE_CUSTOM`）后，ETM 载荷 **132MB → 98KB**（约 1350×）。
+  > 坑：NuttX make 不追踪 `Make.defs` 的 `ARCH_IDLE_CUSTOM` 变化，必须手动删
+  > 旧的 `arm_idle.o`/`libarch.a` 才会重链（头/Make.defs 依赖跟踪弱——改这类
+  > 文件后一律 `rm` 对应 .o）。
+- **NuttX ETM 解码干净**：98KB、begins/ends 配平（12826/12826）、0 dropped、
+  35 函数、295 异常（SysTick/调度）、cycle count + ETM 时间戳齐全。指令流 +
+  调用栈这条链在 NuttX 上完全可用。
+- **heartbeat 内核线程**（20ms 睡眠循环，`CONFIG_NUCLEO_H743ZI_NXTRACE_HEARTBEAT`）
+  在无调试器连接时持续产生 idle↔线程切换——必要，因为 NSH 控制台走 RTT，而连
+  调试器抓 RTT 会清掉 DWT 比较器。
+  > 坑：`CONFIG_PTHREAD_STACK_MIN` 未定义 → 栈大小 0 → HardFault 死在
+  > `stack_dump`；改用写死 1024 字节栈修复。
+
+### 11.2 未解决：DWT 数据值包没出来
+
+DWT 比较器确实在匹配（`DWT_FUNCTION0` 读回 `0x0100000d`，g_running_tasks 被写
+时 bit24 MATCHED 置位），ITM/DWT ATB 也确实到达并口 TPIU（stream 1 非空；关掉
+ITM 后 stream 1 变 0 字节，证明 stream 1 是真 ITM 输出）。**但** deframe 出的
+stream 1 是刚性周期重复 `88 7a c0 ff`，几百字节零变化——既不是预期的 `0x8F` 头
+数据值写包（应含 TCB 指针 `0x2400xxxx`），也不像会变化的本地时间戳。
+
+关键观察：
+
+- SWO 参考（`orbtrace/.../h743-dwt-thread-trace`）用**同样**的 DWT 配置
+  （FUNCTION=0x0D、MASK=0）能解出 `0x8F` TCB 指针包——但走的是**单流、
+  formatter-OFF** 的 SWO TPIU。
+- 本方案是**并口、formatter-ON、多流**（ETM ID2 + ITM/DWT ID1）。
+- 补上固件遗漏的 `ITM_TER=0xFFFFFFFF` + `ITM_TPR=0`，结果不变。
+- 关掉 ITM，stream 1 为空（所以周期字节是 ITM 来源，非 formatter 填充）。
+
+### 11.3 首要怀疑与下一步
+
+1. **deframe 错误重构 stream 1**（首要）。TPIU deframer（`deframe.cpp`）只在
+   ETM stream-2 路径上验证过；它的 `lowbits` 合并逻辑在 ID1（稀疏 ITM）与 ID2
+   （ETM）共享同一 16 字节帧、交错出现时可能在帧边界错切，把 DWT 包搅成这个
+   周期模式。下一步：抓原始 TPIU 帧，按 orbuculum `_getPacket` 语义手工解 ID1
+   字节，确认 deframe 之前线上是否真有 `0x8F` 包——以此区分"线上就没有" vs
+   "deframe bug"。
+2. **ITM 丢了 DWT 载荷、只留时间戳**。ATB 顶不住时 ITM 可能发了跟随 DWT 包的
+   LTS、却丢了 DWT 数据字节。测：降切换频率 / 提 ETM 同步周期；查 ITM overflow。
+3. **是解析器的判别位/长度搞错**，非流本身。`88 7a` 可能是被临时脚本错误定长
+   的合法包。测：用 orbuculum/orbetto 的 ITM 解码器跑这些字节，而非临时解析。
+
+§9 路线状态：**P0 部分达成**（ETM 多流采集 + 干净解码验证；DWT 数据值包待解）；
+P1 deframe 多流改造需连带修 §11.3(1) 的 ID1 重构问题。
