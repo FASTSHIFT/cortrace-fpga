@@ -772,3 +772,73 @@ cortrace-decode --raw --nx-switch-stream 1 --nx-tcbmap tcbmap.txt \
    留 reserved 位。
 4. **执行时间用 ETM TS/CC，不用 FPGA egress 时间**（后者过 ETF FIFO 有滞后）。
 5. **BB + TS/CC 会撑爆并口带宽**：关 BB，间接分支地址靠解码器走 ELF 补全。
+
+---
+
+### 11.10 DAP-only 配置 + 带宽/精度实测 + 2-bit 探索计划（2026-09-16）
+
+#### DAP-only：NuttX 零 trace 代码（最纯的无侵入）
+
+整套 CoreSight 配置（GPIOE TRACED 引脚 + SYSCFG I/O 补偿、TPIU/CSTF/ETF/ETM/TSGEN、
+DWT watch g_running_tasks）**全部由调试器脚本 `host/scripts/nxtrace_dap.cfg` 配置**，
+NuttX 侧一行 trace 寄存器代码都没有（`stm32_nxtrace_setup()` 是空 no-op，只留 demo
+worker）。
+
+原理：NuttX `arm_enable_dbgmonitor()` 在 `DHCSR.C_DEBUGEN=1`（调试器连接）时跳过它的
+DWT 清除 init，所以**只要 DAP 保持连接，DWT 配置存活**——这就是 TRACE32/J-Trace 的
+"探针常驻"模式。`nxtrace_dap.cfg` 把每个块封装成命名 proc（`nxtrace_gpio/clocks/tpiu/
+funnel/etf/etm/dwt` + 顶层 `nxtrace_arm`），`nxtrace_run` 保持 openocd 会话不退出。
+
+```bash
+G=$(arm-none-eabi-nm nuttx | awk '$3=="g_running_tasks"{print "0x"$1}')
+openocd -f interface/cmsis-dap.cfg -f target/stm32h7x.cfg \
+        -f nxtrace_dap.cfg -c "init" -c "nxtrace_arm $G" -c "nxtrace_run"
+# 会话常驻；另开 shell 抓包。切勿让这个 openocd 退出（C_DEBUGEN 掉则 DWT 被清）。
+```
+
+上板实证（零 trace 代码 NuttX）：ETM 28MB + 5482 DWT 切换 + cycle-count 时间基，解成命名
+每线程泳道，与固件配置版结果一致。产物 `perftrace/nuttx_dap_only.perfetto`。
+
+> ⚠️ 踩坑：`nxtrace_gpio` 的 MODER 值一开始写成 `0x0AA0` 只配了 4 个 pin，PE6/TRACED3
+> 留在 input 态没驱动 → LA 上 D3 摆幅不足、抓包 `0xFF` 全无、deframer 锁不住。修成
+> `0x2AA0`（5 个 pin）+ 补 SYSCFG I/O 补偿单元后正常。手算多-pin 掩码易漏，务必核对位宽。
+
+#### 时间戳精度
+
+- **底层刻度 = 1 CPU cycle = 1/150MHz ≈ 6.67 ns**（cycle-count 计数单位）。
+- **有效分辨率 ≈ 16 cycle ≈ 107 ns**：`TRCCCCTLR=0x10` 阈值 = ETM 每积够 16 cycle 才发一个
+  Cycle Count 元素。相邻锚点间无新时间信息，故实际能区分的间隔 ~107ns。
+- **Perfetto 里的"缝隙"和"零宽函数"**：缝 = cycle-count 锚点稀疏 + BB-off 地址补全区无独立
+  时间锚 + 该线程此刻没跑（真实调度间隙）；零宽函数 = 真实耗时 < 107ns 量子，begin/end 映到
+  同一 tick 塌缩成 0 宽——**调用顺序/嵌套准确（来自 ETM B/E 配平，与时间无关），只是时长测
+  不出**。要更细：`TRCCCCTLR` 降到 CCITMIN=4（~27ns），代价是带宽上升。
+
+#### 带宽利用率 + drop（4-bit @ TRACECLK 100MHz，3s 抓包）
+
+| 指标 | 值 |
+|------|-----|
+| 物理线速 | 45.9 MB/s（4-bit DDR 理论上限 ~100 MB/s，**约 46%**）|
+| drop | **seq-gap=0 / lost-frames=0 / ring-full=0 / ETF 无溢出**（A-syncs 81763）|
+| 采集 150MB 构成 | ETM 83.9MB(56%) + DWT 148KB(0.1%) + halfsync/idle 填充 ~66MB(44%) |
+
+结论：**零丢包，物理层半载**。44% 是 NuttX idle（WFI 无指令，TPIU 填 halfsync）的真实反映，
+可压缩。带宽有一倍余量。
+
+#### 2-bit 模式探索计划（减线、降串扰、CLK 提升空间）
+
+动机：4-bit 只用 46% 带宽，且 idle 填充占 44%。**改 2-bit（只用 TRACED0/1）**可减两根信号
+线 → 串扰更小、走线更容易 → **TRACECLK 有提升空间**（可能补回窄总线的吞吐损失甚至更快）。
+
+- **理论**：2-bit 每字节耗 2× TRACECLK 周期，同频吞吐减半（~50MB/s→~23MB/s 有效），但当前有效
+  trace 才 56MB/3s ≈ 28MB/s 峰值，2-bit 在同频下**可能刚好够**；若 TRACECLK 能从 100M 提到
+  ~150-180M，2-bit 就能追平甚至超过 4-bit@100M。
+- **改动点**：
+  - 固件/DAP：`TPIU_CURPSIZE` 4-bit(0x08)→ 2-bit(0x02)；GPIO 只配 PE2(CK)+PE3/PE4(D0/D1)。
+    在 `nxtrace_dap.cfg` 加一个 `nxtrace_width {n}` proc 参数化。
+  - FPGA：`trace_ctrl.py set-width 2`（RTL 运行时可切，一个 bitstream 通吃，见 AGENT.md 坑点22）。
+  - host：`cortrace-decode` deframe 的位宽重组（AGENT.md 坑点22 的 `trace_width.py` 语义，
+    2-bit 每字节跨 2 个 TRACECLK）。**当前 cortrace 的 deframe 是否处理 2-bit 待确认/补。**
+  - TRACECLK：从 board.h/DAP 提 PLL1R（TRACECLKIN），逐档扫眼图找 2-bit 的可用上限。
+- **判据**：2-bit 下 drop=0、A-sync 密度、调用边配平、cycle-count 精度不劣于 4-bit；
+  对比 perf。
+- **状态：未做，待实验。**
