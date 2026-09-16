@@ -81,6 +81,13 @@ def main(argv=None):
         help="skip capture; decode this existing raw .bin instead",
     )
     ap.add_argument(
+        "--head-bytes",
+        type=int,
+        default=0,
+        help="decode only the first N bytes of the raw capture (0 = all); "
+        "handy for a browser-friendly preview of a big capture",
+    )
+    ap.add_argument(
         "--sudo",
         action="store_true",
         help="run stream_grab under sudo (raw socket needs privilege)",
@@ -134,6 +141,18 @@ def main(argv=None):
         r = _run(grab_cmd)
         if r.returncode != 0:
             sys.exit("stream_grab failed")
+
+    # optional: truncate to the first N bytes for a browser-friendly preview
+    if a.head_bytes > 0:
+        head = os.path.join(tempfile.gettempdir(), "cortrace_live_head.bin")
+        with open(raw, "rb") as src, open(head, "wb") as dst:
+            dst.write(src.read(a.head_bytes))
+        sz = os.path.getsize(head)
+        print(
+            f"[cortrace-live] truncated raw to first {sz} bytes -> {head}",
+            file=sys.stderr,
+        )
+        raw = head
 
     # 3. decode -> perfetto
     if a.save:
