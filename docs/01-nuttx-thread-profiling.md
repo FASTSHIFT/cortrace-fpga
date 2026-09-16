@@ -875,3 +875,99 @@ CPU 时钟**（host 仍 `--sysclk-hz 150000000`）。逐档实测（2-bit，各�
   更优。200M 需要重新校 FPGA IDELAY tap 眼心（阶段一手段）才可能救回，未做。
 - board.h 已定在 **PLL1R=4（150M TRACECLKIN）** 作为 2-bit 工作点。
 - **状态：2-bit 提频 done，干净上限 150M。**更高频需 FPGA eye/tap 重校（roadmap）。
+
+---
+
+### 11.11 CPU 提到 200MHz 后的 overflow，用 O2 编译缓解（2026-09-16，已定论）
+
+**背景**：把 CPU 从 150M 提到 200MHz（board.h `PLL1P` DIVP1=4→3 → sysclk 200M；
+`PLL1R` 保持 =4 → TRACECLKIN 仍 150M，两者共用 VCO600M 但分频独立）。**CPU 更快 =
+单位时间执行更多指令/分支 = ETM 字节产率更高**，随即在 Perfetto 里看到调用栈乱（SVCall
+反复重入、诡异深嵌套）。
+
+**先破一个方法论错误**：判断 trace 是否干净**不能只看网络层 seq-gap/lost**（那只证明
+UDP 没丢包），也**不能只看 `begins==ends balanced`**（callstack 有启发式重平衡，会把
+丢数据后的错配"配平"骗过肉眼）。**必须看解码器的 stream health**（NO_SYNC / overflow /
+resync）。为此先修了 cortrace 一个静默吞错误的 bug（见下"工具修正"），然后才敢下结论。
+
+**确证 O0 200M = overflow**：opencsd 适配层修好后，200M/O0 capture 解出
+**lost-sync=29921 / resync(TraceOn)=29921 → LOSSY**——ETM/ETF 每秒溢出近 3 万次丢数据，
+坐实之前"200M 零丢包扛得住"是错的（那结论只看了网络层）。溢出点下游的调用图全部不可信。
+
+**O2 机理**：NuttX 默认 `CONFIG_DEBUG_NOOPT=y`（-O0，一堆冗余 load/store、栈倒腾、
+不消除的分支）。开 `CONFIG_DEBUG_FULLOPT=y`（-O2）后指令数和**分支/waypoint 数**大幅下降
+——而 ETM 带宽主要由分支/waypoint 驱动——直接降低字节产率。选 O2 不选 O3：O3 会把叶函数
+全内联，调用栈塌得更狠（profiling 可读性变差），O2 是带宽与栈深度的平衡点。
+
+**上板实测（O2，CPU200M / TRACECLK150M，4-bit，1s 抓包）**：
+
+| 编译 | lost-sync | overflow | resync | dropped calls | 判定 |
+|:----:|:---------:|:--------:|:------:|:-------------:|:----:|
+| O0 (NOOPT) | 29921 | 0 | 29921 | — | ❌ LOSSY |
+| **O2 (FULLOPT)** | **0** | **0** | **0** | **0** | ✅ **clean** |
+
+- ETM 36.3MB / 1s、6.28M slice、3.14M begin=end 配平、DWT 26852 切换、max depth 12。
+- **O2 完全消除了 200M 下的 ETM overflow**：mid-stream 失锁从 29921 → 0。
+- 代价：`mismatched returns=26969`（O0 也有 27459，量级相当）——这是**内联导致的调用栈
+  启发式重平衡**（叶函数内联后 ETM 里没有独立 call/return 边界），**不是丢数据**
+  （stream clean + dropped calls=0 + balanced 三者同时成立才能这么判）。嵌套顺序仍准确
+  （来自 ETM B/E 配平，与时间/内联无关），只是部分被内联的叶调用不再显示为独立泳道。
+- 产物 `perftrace/nuttx_o2_cpu200_4bit.perfetto`。
+
+**2-bit 对照**：O2 2-bit @200M 仍 LOSSY（lost-sync=56404）——但那是 **2-bit@150M 链路
+物理上限 75MB/s** 撞顶（ETM 峰值产率 ~75MB/s），不是 O2 没效果。4-bit 链路上限 150MB/s，
+ETM 峰值落在其下 → clean。**200M 要用 4-bit**；2-bit 适合 ≤150M CPU。
+
+**工具修正（本次连带，已 commit）**：
+1. **stream health 区分"启动同步"与"真丢数据"**：opencsd 的 `NO_SYNC` 有两种——流最开始
+   等首次同步（正常，每条流恰好 1 次）和溢出后 mid-stream 重新同步（真丢数据）。原来一律
+   记 `lost-sync` 并触发 LOSSY，导致干净的流也被误报（startup 的那 1 次）。改成：首个
+   InstrRange 之前的 NO_SYNC 计 `startup-sync`（不算 loss），之后的才计 `lost-sync`。
+2. **良性元素单列 `benign`**：`PE_CONTEXT`（每次上下文/线程切换发）、`SYNC_MARKER`、
+   `EO_TRACE`、`EVENT` 原来全塞进 `other`，89125 个良性元素让人误以为有大量异常。新增
+   `ElementKind::Benign` 单独计数，`other` 只留真正未建模的类型（现在 =0）。
+3. 现在 O2 4-bit 报告：`lost-sync=0 overflow=0 resync=0 addr-nacc=0 startup-sync=1
+   benign=89125 other=0 -> clean`，诚实反映"健康但含大量正常上下文包"。48 单测全过。
+
+**结论**：**200MHz CPU 用 O2 编译 + 4-bit@150M TRACECLK = 零 overflow 干净 trace。**
+O2 是提 CPU 频率后压低 ETM 产率、避免 ETF 溢出的关键手段，代价是内联让调用栈略浅
+（O2 而非 O3 以保留栈可读性）。board.h 定在 sysclk 200M / TRACECLKIN 150M，NuttX
+`.config` 定在 `CONFIG_DEBUG_FULLOPT=y`。
+
+#### ETM 产率实测 + 2-bit 能否顶住 200M 的定量分析（2026-09-16）
+
+把"平均产率"和"链路出口上限"都钉死后判断峰值。锚点均为 CPU200M / O2 / 1s 窗口：
+
+| capture | 净 ETM 产率 | stream health |
+|:-------:|:-----------:|:-------------:|
+| **4-bit @150M**（clean）| **36.3 MB/s**（36 335 891 B / 1s，1s=200M CPU cycles 校准）| lost-sync=0 ✅ |
+| 2-bit @150M（LOSSY）| 34.4 MB/s（挤出的，真实欲发更多）| lost-sync=56403 ❌ |
+
+- **平均产率（取 4-bit clean 权威值）≈ 36 MB/s 净 ETM**；加 TPIU 16B frame 的 ~6.7%
+  framing + DWT（214 KB/s）→ **formatted 平均 ≈ 39 MB/s**。
+
+**链路出口上限**（真正硬约束 = TPIU 按 TRACECLK 从 4KB ETF 取数、DDR 双沿）：
+
+| 位宽 | 出口带宽 @150M TRACECLKIN |
+|:----:|:-------------------------:|
+| 4-bit | 150M × 4 × 2 / 8 = **150 MB/s** |
+| 2-bit | 150M × 2 × 2 / 8 = **75 MB/s** |
+
+> 注：FPGA→host 网络两次都测 75 MB/s，不随位宽变，那是 FPGA 采集管道含填充的固定速率，
+> **不是** ETM 净产率，也不是这里的出口瓶颈。真正的瓶颈是 ETF→TPIU 引脚这一段。
+
+**判断（平均 vs 峰值）**：
+
+- 2-bit 出口 75 MB/s vs formatted 平均 39 MB/s → **平均有近 2× 余量，"按平均"顶得住**。
+- 但 **ETM 是突发流**：NuttX idle 时几乎 0 字节（WFI 无指令），`worker_compute` 跑密集
+  循环时瞬时冲高。活跃 burst 峰值 ≥ ~2× 平均 ≈ 78 MB/s，**直接破 2-bit 的 75 MB/s 出口**；
+  ETF 只有 4KB，兜不住这个峰值差 → 溢出。4-bit 出口 150 MB/s 对峰值仍有 ~2× 余量 → 吸得住。
+- **实测坐实**：同负载同 150M TRACECLK，唯一变量是位宽 → 2-bit LOSSY(56403) / 4-bit clean(0)，
+  说明峰值恰落在 75~150 MB/s 之间。
+
+**结论：200M CPU + O2 下，2-bit@150M 理论"平均扛得住、峰值扛不住"，实测确认顶不住 →
+200M 必须 4-bit。2-bit 的舒适区是 ≤150M CPU。** 要硬让 2-bit 顶 200M 只有三条路，均有代价：
+(1) TRACECLK 提 >200M——但 2-bit 干净上限就是 150M（200M 眼闭），需 FPGA 重校 IDELAY，死路；
+(2) 压 ETM 峰值产率（提 `TRCSYNCPR`、ViewInst 只 trace 关心区间、去掉 cycle-count）把峰值压到
+75 以下；(3) 降 CPU 回 ~150M。一句话：**瓶颈是突发峰值不是平均值，平均 39MB/s 够、峰值破
+75MB/s 就溢出。**
