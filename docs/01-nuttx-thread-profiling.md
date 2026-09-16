@@ -841,4 +841,18 @@ openocd -f interface/cmsis-dap.cfg -f target/stm32h7x.cfg \
   - TRACECLK：从 board.h/DAP 提 PLL1R（TRACECLKIN），逐档扫眼图找 2-bit 的可用上限。
 - **判据**：2-bit 下 drop=0、A-sync 密度、调用边配平、cycle-count 精度不劣于 4-bit；
   对比 perf。
-- **状态：未做，待实验。**
+
+**上板实测（2026-09-16，TRACECLK 100MHz 未提频，先验证 2-bit 通路）：**
+
+- **cortrace 补齐 width-generic deframe**（`DeframePhase.width` + 宽度无关重组，`--trace-width`
+  CLI，见 commit）；DAP 脚本加 `nxtrace_set_width 2` proc（TPIU CURPSIZE=1<<(W-1)）；
+  FPGA `trace_ctrl.py set-width 2`（RTL 运行时可切）。三端一致即可。
+- **2-bit @100MHz 实测**：2s 抓 100MB，**drop=0**（seq-gap/lost/ring-full 全 0）；
+  deframe 出 ETM 46.2MB + DWT 98620B → **10959 切换事件**，phase 自动锁 (parity=2,order=0)，
+  **A-syncs 222478**（比 4-bit 同窗口更密——2-bit 每 TPIU 字节占 2 TRACECLK，halfsync 填充
+  占比低，raw 利用率更高）。调用/切换全部解出，与 4-bit 等价。
+- **结论**：**2-bit 在 100MHz 未提频就已跑通、零丢包**。有效吞吐 ~23MB/s（4-bit ~28MB/s），
+  当前 NuttX 负载够用。**下一步（未做）**：2-bit 少两根线,可扫 TRACECLK 眼图往 ~150-180MHz
+  提频,补回甚至超过 4-bit 吞吐,同时串扰更小、走线更省。提频需 board.h/DAP 改 PLL1R +
+  逐档验 drop=0 + A-sync 密度。
+- **状态：2-bit 通路 done；提频待实验。**
