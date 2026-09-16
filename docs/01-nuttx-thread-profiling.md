@@ -852,7 +852,26 @@ openocd -f interface/cmsis-dap.cfg -f target/stm32h7x.cfg \
   **A-syncs 222478**（比 4-bit 同窗口更密——2-bit 每 TPIU 字节占 2 TRACECLK，halfsync 填充
   占比低，raw 利用率更高）。调用/切换全部解出，与 4-bit 等价。
 - **结论**：**2-bit 在 100MHz 未提频就已跑通、零丢包**。有效吞吐 ~23MB/s（4-bit ~28MB/s），
-  当前 NuttX 负载够用。**下一步（未做）**：2-bit 少两根线,可扫 TRACECLK 眼图往 ~150-180MHz
-  提频,补回甚至超过 4-bit 吞吐,同时串扰更小、走线更省。提频需 board.h/DAP 改 PLL1R +
-  逐档验 drop=0 + A-sync 密度。
-- **状态：2-bit 通路 done；提频待实验。**
+  当前 NuttX 负载够用。
+
+**2-bit TRACECLK 提频扫描（2026-09-16，改 board.h PLL1R，sysclk 不变）：**
+
+PLL1R 只喂 TRACECLKIN，独立于 PLL1P/sysclk（VCO 600M 共用但分频独立），所以改它**不动
+CPU 时钟**（host 仍 `--sysclk-hz 150000000`）。逐档实测（2-bit，各抓 2s）：
+
+| PLL1R | TRACECLKIN | 线速 | drop | A-syncs | deframe | 判定 |
+|:-----:|:----------:|:----:|:----:|:-------:|:-------:|:----:|
+| 6 | 100 MHz | 50 MB/s | 0 | 222478(*) | ✓ 锁定 | ✅ |
+| 5 | 120 MHz | 60 MB/s | 0 | 64675 | ✓ 锁定 | ✅ |
+| 4 | 150 MHz | 75 MB/s | 0 | 54511 | ✓ 锁定 | ✅ **干净上限** |
+| 3 | 200 MHz | 100 MB/s | 0(网络) | 1114 | ✗ 大面积失锁 | ❌ |
+
+(*) 100M 那次抓的窗口/负载相位不同，A-sync 绝对值不可直接横比；关键是 100/120/150M 都
+**deframe 干净锁定、ETM 55MB 量级、drop=0**；200M 时 ETM 塌到 7.4MB、A-sync 1114 = IDDR
+眼闭合、nibble 采样错（阶段一同款眼图问题，AGENT.md 坑点 17/坑23）。
+
+- **结论**：**2-bit 干净上限 = TRACECLKIN 150MHz（TRACECK 引脚 75MHz 边沿率），零丢包。**
+  比原 100M 提升 50%，线速 75MB/s，**用两根线达到接近 4-bit@100M 的物理吞吐**，串扰/走线
+  更优。200M 需要重新校 FPGA IDELAY tap 眼心（阶段一手段）才可能救回，未做。
+- board.h 已定在 **PLL1R=4（150M TRACECLKIN）** 作为 2-bit 工作点。
+- **状态：2-bit 提频 done，干净上限 150M。**更高频需 FPGA eye/tap 重校（roadmap）。
