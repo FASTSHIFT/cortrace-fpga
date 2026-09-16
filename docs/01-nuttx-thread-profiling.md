@@ -630,7 +630,7 @@ ETM firehose 饿死稀疏的 DWT 包）；ETM 侧保持 WFI idle 降产量；重
 **§11.7 的方向已上板证实：DWT 数据值包确实能从并口 TPIU 出来。** 但过程中先撞上一个
 把前几轮实验全部带偏的硬件坑，先记这个坑，它是理解 §11.4-11.6 为何误判的最后一块。
 
-#### 关键坑：CoreSight trace 寄存器的硬件污染，SRST/reset 清不掉，只有整板下电才复位
+#### 关键坑：CoreSight trace 寄存器污染，系统复位(SRST)不复位 debug 子域，需整板下电
 
 现象：改过 CSTF 配置后，无论怎么重编、重烧、`reset run`，LA 上空闲活动都从原来的
 `TRACED3` 跑到了 `TRACED1`，抓包 cortrace **一帧都解不出**（TPIU sync 字节序整体反了），
@@ -642,14 +642,26 @@ ETM firehose 饿死稀疏的 DWT 包）；ETM 侧保持 WFI idle 降产量；重
 3. 读 CSTF → `CSTF_CTRL=0x030f`（ENS0..3 全开！）、`CSTF_PRIORITY=0`（复位应 0x688）。
    基线固件用 `CSTF_CTRL |= ENS0`（OR，非覆盖），**清不掉我实验设过的 ENS1/2/3**；而我
    一次错误的 `CSTF_PRIORITY = 0x1` 覆盖写把 reserved 位也清了。
-4. `reset`（SRST）**清不掉这些**——CoreSight 组件在 debug 域，SRST 不复位它们。
+4. `reset`（openocd SRST）**清不掉这些**——实测下电才恢复。
 
-**根因：CoreSight 配置一旦写脏，只有整板下电（cold power cycle）才能复位。** 多 slave
-口全开 + 优先级乱 → funnel 仲裁乱套 → 数据在 4 根 TRACED 上的 nibble 铺法变了 → LA
-看到 lane 迁移 + 解帧器锁不住相位。**用户拔插 DAP、整板下电后，一切恢复正常。**
+**根因（已回手册核实，修正早先"必须下电"的口语说法）：** RM0433 Rev 8 §60.3.3
+《Reset of debug infrastructure》(p.3079) 原文：
 
-> 教训（已并入操作规范）：**任何改动 CSTF/TPIU/ETF/ETM 的实验，验证前必须整板下电一次**，
-> 不能只靠 SRST/`reset`/重烧。openocd `reset` 给的是"看起来干净"的假象。
+> "The debug components, except for the debug port and access ports, are reset by
+> their **respective power domain resets**. The debug port (SWJ-DP) is reset by a
+> **power-on reset of the D3 domain only**."
+
+即 CSTF/ETF/TPIU（D1 域）由 **D1 域复位**复位、不是由 CPU 系统复位复位；SWTF/SWO（D3
+域）由 D3 域复位复位。openocd 的 SRST 触发的是**系统复位**，它按设计**不复位这些 debug
+子域**（正是为了复位时不丢调试连接）；且调试器保持连接时 `CDBGPWRUPREQ` 一直拉高，域
+一直供电、域复位也不发生。两者叠加 → SRST/重烧都清不掉脏的 CSTF，**只有整板下电（同时
+掉 D1/D3 域电）才真正复位**。多 slave 口全开 + 优先级乱 → funnel 仲裁乱套 → 数据在 4 根
+TRACED 上的 nibble 铺法变了 → LA 看到 lane 迁移 + 解帧器锁不住相位。**用户拔插 DAP、
+整板下电后，一切恢复正常。**
+
+> 教训（已并入操作规范）：**任何改动 CSTF/TPIU/ETF/ETM 的实验，验证前必须整板下电一次**
+> （同时复位 D1/D3 debug 域），不能只靠 SRST/`reset`/重烧——系统复位按设计不复位这些
+> debug 子域（RM0433 §60.3.3）。openocd `reset` 给的是"看起来干净"的假象。
 >
 > 另一个方法学陷阱：**openocd 连接会清掉 `DWT_FUNCTION`**（debugger connect 复位 DWT），
 > 所以用 openocd 读 DWT_FUNCTION 永远看到 0，不可信；要么固件 UART 自回读，要么直接看
