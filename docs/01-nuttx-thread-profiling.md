@@ -698,3 +698,77 @@ stream 1 前若干包：`08 8f <payload LE> c0 b3 ...`，解出 payload 序列
 - 下一步回到 §5：cortrace 的 deframe 多流改造 + nxtrace 模块，把 stream 1 的 DWT
   数据值包（NuttX 上 = `g_running_tasks` 的新 TCB 指针）解成线程切换事件，叠加到 ETM
   函数级时间线上。P0 地基（DWT 数据值包上并口）**已打通**。
+
+---
+
+### 11.9 端到端打通：NuttX 线程级 profiling 全链路上板（2026-09-16）
+
+**里程碑：用 ~¥300 的硬件（Artix-7 A7-Lite + STM32H743）+ 全开源工具链，做出了
+TRACE32/J-Trace 级的 RTOS OS-aware trace，并直接导出 Perfetto。** 零侵入（不改调度器）、
+零 UAF（离线 ELF + 活表快照）、ETM 指令流与 DWT 线程切换同流同时钟。
+
+#### 最终架构
+
+```
+STM32H743 (NuttX, board-level bring-up only)          Artix-7 FPGA        Host (cortrace)
+  ETM  ──ATB──► CSTF S0 ─┐                              4-bit 并口采集       多流 demux
+  DWT/ITM ─────► CSTF S1 ─┴─► ETF ─► TPIU ─► TRACED[3:0] ───UDP──►  ETM 解码 + nxtrace
+       (DWT watch g_running_tasks = 每次线程切换的新 TCB 指针)                每线程泳道 + 调用栈
+                                                                             → Perfetto
+```
+
+#### 固件侧（NuttX board bring-up，`stm32_nxtrace.c`，零内核侵入）
+
+- 并口 trace 通路：GPIOE PE2..PE6=TRACECK/TRACED0..3、TPIU 4-bit、CSTF `ENS0|ENS1`
+  （S0=ETM、S1=ITM/DWT，S1 优先级高于 S0）、ETF HW-FIFO、ETM。
+- ETM 配置：**关 BB**（带宽）+ **开 TS + CCI** + 使能 TSGEN → 执行时间基。
+- DWT comparator 0 watch `&g_running_tasks[0]`，FUNCTION=0x0D（数据值写包），passive
+  watchpoint 不停 CPU。
+- **DWT 自 re-arm**：worker 线程每轮检查并恢复 DWT（NuttX debug-monitor init / 调试器
+  连接会清 DWT_COMP0/FUNCTION0，这是上板一开始抓不到切换包的真凶）。
+- 差异化 demo workload：`worker_compute`（算术调用树）+ `worker_fileio`（tmpfs 读写），
+  两条明显不同的调用栈，`sched_yield` 乒乓持续制造切换。
+
+#### 主机侧（cortrace）
+
+- `tpiu_deframe_multi`：一趟 demux 所有 TPIU stream（ETM=2, DWT/ITM=1），共享字节时间基。
+- `parse_dwt_data_values`：DWT 数据值写包 → `(src_index, comparator, value)` 事件。
+- `build_thread_runs` + `NuttxResolver`：切换事件 → 线程运行区间；TCB 指针 → 线程名
+  （堆 TCB 用 `--nx-tcbmap` 从活 g_pidhash 表离线解析，§4.3 路2）。
+- `reattribute_slices_to_threads`：ETM 调用栈按 byte_index 归属到当前线程 track → **每线程
+  一条泳道显示各自调用栈**；boot 上下文在首次切换处收尾。
+- 时间基：`--cycle-time --sysclk-hz 150000000`，线程 track 与调用栈同走 ETM 执行时间
+  （非滞后的 FPGA ETF-egress 时间）。
+
+#### 复现命令
+
+```bash
+# 1. 抓包（不要碰 openocd —— 调试器连接会清 DWT）
+host/scripts/stream_grab <nic> 1 capture.bin 256 512
+# 2. dump 活线程名映射（抓包之后，只读活 g_pidhash 条目，无 UAF）
+host/scripts/nx_tcbmap.py --elf nuttx --out tcbmap.txt
+# 3. 解码 → 每线程泳道 + 调用栈 + cycle 执行时间 → Perfetto
+cortrace-decode --raw --nx-switch-stream 1 --nx-tcbmap tcbmap.txt \
+    --cycle-time --sysclk-hz 150000000 \
+    --elf nuttx --perf out.perfetto capture.bin nuttx.syms
+```
+
+#### 上板实证数据（1s 抓包，150 MHz sysclk）
+
+- ETM stream 2 ~30 MB、DWT stream 1 数万个 `0x8F` 数据值包、0 dropped。
+- cycle-count 合计 ≈ 150,016,268 cycles = 150 MHz × 1 s（时钟精确）。
+- Perfetto：`worker_compute (pid2)` 显示 compute_mix/compute_step；`worker_fileio (pid3)`
+  显示 file_open/readv/writev/inode_checkopenperm；`nx_start(idle)`；`Threads` 调度轨；
+  ISR 轨 PendSV/SVCall/SysTick（切换正走 PendSV/SVCall）。
+- 产物：`perftrace/nuttx_workers.perfetto`。
+
+#### 关键教训（避免重踩）
+
+1. **CoreSight trace 寄存器污染**：系统复位(SRST)不复位 debug 子域（RM0433 §60.3.3），
+   改过 CSTF/TPIU 后需整板下电；或让固件持续 re-arm。
+2. **openocd 连接会清 DWT_FUNCTION**：抓包前别碰 openocd；DWT 状态靠固件自读或看抓包，
+   不用 openocd 读。
+3. **ITM 是 CSTF S1，不是 S2**（H7 CSTF 只有两个 slave 口）；写 CSTF_PRIORITY 用 RMW 保
+   留 reserved 位。
+4. **执行时间用 ETM TS/CC，不用 FPGA egress 时间**（后者过 ETF FIFO 有滞后）。
+5. **BB + TS/CC 会撑爆并口带宽**：关 BB，间接分支地址靠解码器走 ELF 补全。
