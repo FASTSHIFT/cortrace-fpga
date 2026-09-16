@@ -570,3 +570,119 @@ trace 互联只把 timestamp/指令类包送 ETF）。
 
 §9 路线更新：P0 定论——DWT 走并口此芯片不可行，改 SWO 旁路；P1+ 的 nxtrace 按
 "ETM(并口) + DWT(SWO) 双出口 + 主机对齐"设计。
+
+---
+
+### 11.7 更正：§11.6"DWT 走并口不可行"结论有误，根因是 CSTF 端口配错（2026-09-16）
+
+**本节推翻 §11.4/11.5/11.6 的核心结论。** 用 pymupdf4llm（比 pdftotext 可靠得多，
+位域/连接表抽取干净）重新啃 RM0433 §60 的**框图与寄存器表**，配合原始矢量图核对，
+坐实了并口路径可用，之前的"拓扑墙"是配置错误造成的假象。
+
+**手册证据（RM0433 Rev 8）：**
+
+- **Figure 827《Block diagram of debug infrastructure》（§60.3.1, p.3075）**：
+  `ITM → Replicator`，replicator **两个输出分别接 CSTF 和 SWTF**（CoreSight
+  replicator 语义为 1 入 2 出，把 ITM 的 ATB 复制两份）。`ETM → CSTF`。
+  即 ITM/DWT 在拓扑上**同时**通往并口（CSTF→ETF→TPIU）和单线（SWTF→SWO）。
+- **§60.5.4 Trace funnel (CSTF)（p.3135）白纸黑字**：
+  > The slave ports are connected as follows:
+  > - S0: Cortex-M7 ETM
+  > - S1: Cortex-M7 ITM
+
+  且 `CSTF_CTRL`（offset 0x000，复位值 0x0000_0300）：bit0=`ENS0`、bit1=`ENS1`，
+  **复位时两口都未使能**；`CSTF_PRIORITY`（offset 0x004，复位 0x0000_0688）：
+  `PRIPORT0[2:0]`=S0 优先级、`PRIPORT1[2:0]`=S1 优先级，0=最高、7=最低。
+- **Figure 828《Power domains》（§60.3.3, p.3077）**：`CSTF/ETF/TPIU` 在 **D1 域**，
+  `SWTF/SWO` 在 **D3 域**。正文："D1 power domain … needs to be on whenever a trace
+  functionality is active on the processor"（core 一跑就有电）；"D3 power domain is
+  always considered to be on when the debugger is connected"（**没调试器 D3 掉电**）。
+  → 并口路径不依赖调试器；**SWO 反而天生依赖 debug 域供电**（解释了 SWO side-track
+  里"接 openocd 抖几下、断开就停"的现象）。
+
+**§11.6 实验为何得出错误结论：** 那次隔离实验的固件把 CSTF 使能写成了
+`ENS1 | ENS2`（见当时的 `etm_regs.h`），但 **H743 的 CSTF 只有 S0/S1 两个 slave 口，
+根本没有 S2**；ITM 是 **S1**。所以实验实际上**从未正确使能 ITM 那一路 + 配优先级**，
+"抓不到 0x8F 包"是配错端口的必然结果，不是拓扑不通。ITM 时间戳能过并口，是因为它
+在别处生成，恰好掩盖了 S1 未正确使能的事实。
+
+**更正后的结论：**
+
+- **ITM/DWT 数据值包可以走并口 TPIU 混流**：路径 `ITM → replicator → CSTF S1 →
+  ETF → TPIU → 并口`，全程在 D1 域，**不需要调试器、不碰 SWO/D3 电源坑**。
+- 之前绕进的 SWO side-track（§11.6 起）**可以绕开**：回到已验证跑通的并口 FPGA 采集，
+  把 DWT 数据值包按正确的 CSTF S0+S1 配置混进 ETM 那条流，host 端按 ATB ID 解复用
+  （ETM=2、ITM/DWT=1）。这恢复了 §0 "同流同时钟"的原始设计优势。
+
+**下一步（P0 重做）：** 固件 CSTF 配置改为 `ENS0|ENS1` 且给 S1(ITM) 设**高于**
+S0(ETM) 的优先级（`PRIPORT1 < PRIPORT0`，手册："高优先级给数据量小的源"，避免
+ETM firehose 饿死稀疏的 DWT 包）；ETM 侧保持 WFI idle 降产量；重抓验证 stream 1
+是否出现 `0x8F` TCB 指针包。
+
+> 工具说明：本节的手册核查改用 **pymupdf4llm**（本地、无需 GPU，对 RM0433 这类原生
+> 数字版 PDF 的位域表格保留良好）。pdftotext 对散文可靠，但框图连线丢失、寄存器表
+> 版式错乱，是 §11.4-11.6 误判的诱因之一。
+
+---
+
+### 11.8 已验证（上板实证）：DWT 数据值包成功走并口 TPIU + 关键的硬件污染坑（2026-09-16）
+
+**§11.7 的方向已上板证实：DWT 数据值包确实能从并口 TPIU 出来。** 但过程中先撞上一个
+把前几轮实验全部带偏的硬件坑，先记这个坑，它是理解 §11.4-11.6 为何误判的最后一块。
+
+#### 关键坑：CoreSight trace 寄存器的硬件污染，SRST/reset 清不掉，只有整板下电才复位
+
+现象：改过 CSTF 配置后，无论怎么重编、重烧、`reset run`，LA 上空闲活动都从原来的
+`TRACED3` 跑到了 `TRACED1`，抓包 cortrace **一帧都解不出**（TPIU sync 字节序整体反了），
+而同期老抓包 `fpga_perf.bin` 仍能正常解。排查链条：
+
+1. 读 flash 字节与新编 `.bin` 对拍 → **一致**，排除"没编进去/没烧进去"。
+2. 读 STM32 侧全部 trace 寄存器（GPIOE AF0、TPIU 4-bit、时钟 56MHz、ETM
+   TRCPRGCTLR=1 正在 trace）→ **全部 golden，找不出差异**。
+3. 读 CSTF → `CSTF_CTRL=0x030f`（ENS0..3 全开！）、`CSTF_PRIORITY=0`（复位应 0x688）。
+   基线固件用 `CSTF_CTRL |= ENS0`（OR，非覆盖），**清不掉我实验设过的 ENS1/2/3**；而我
+   一次错误的 `CSTF_PRIORITY = 0x1` 覆盖写把 reserved 位也清了。
+4. `reset`（SRST）**清不掉这些**——CoreSight 组件在 debug 域，SRST 不复位它们。
+
+**根因：CoreSight 配置一旦写脏，只有整板下电（cold power cycle）才能复位。** 多 slave
+口全开 + 优先级乱 → funnel 仲裁乱套 → 数据在 4 根 TRACED 上的 nibble 铺法变了 → LA
+看到 lane 迁移 + 解帧器锁不住相位。**用户拔插 DAP、整板下电后，一切恢复正常。**
+
+> 教训（已并入操作规范）：**任何改动 CSTF/TPIU/ETF/ETM 的实验，验证前必须整板下电一次**，
+> 不能只靠 SRST/`reset`/重烧。openocd `reset` 给的是"看起来干净"的假象。
+>
+> 另一个方法学陷阱：**openocd 连接会清掉 `DWT_FUNCTION`**（debugger connect 复位 DWT），
+> 所以用 openocd 读 DWT_FUNCTION 永远看到 0，不可信；要么固件 UART 自回读，要么直接看
+> 抓包里的 DWT 包，不要用 openocd 读 DWT 状态下结论。
+
+#### 上板结果（整板下电 + 修正 CSTF S0+S1 后）
+
+固件：`selftrace + dwt=1`，`etm_selftrace_setup` 里 CSTF 改为 `ENS0|ENS1`（S1=ITM），
+优先级用 **read-modify-write**（保留 reserved 位）给 S1 设 0（高）、S0 设 1（低）。
+DWT 比较器 watch `g_dwt_probe`，每次迭代写递增值。`board.sh grab 0.3` 抓 16.9MB：
+
+| stream | 内容 | 结果 |
+|--------|------|------|
+| 2 (ETM) | 指令流 | etm=6.96MB, A-syncs=6785, frames=498766, 0 dropped ✓ |
+| 1 (ITM/DWT) | DWT 数据值包 | **334720 B, 42260 个 `0x8F` 数据值写包** ✓ |
+
+stream 1 前若干包：`08 8f <payload LE> c0 b3 ...`，解出 payload 序列
+`0x496e8b, 0x496e8c, 0x496e8d, …` —— **严格 +1 递增、零丢包**（deltas 全 = 1），
+正是固件每次迭代写入 `g_dwt_probe` 的递增值，被 DWT 硬件在写发生瞬间捕获、经
+`CSTF S1 → ETF → 并口 TPIU` 输出、host 端完整还原。
+
+**对比**：整板下电前（污染态）同固件 stream 1 只有 92 字节的周期 `7a c0 ff 88`（纯 ITM
+时间戳、0 个 0x8F）；下电后 334KB 带递增 payload。**这直接证明"抓不到 DWT 包"是硬件
+污染，不是拓扑限制。**
+
+#### 定论（取代 §11.6）
+
+- **ETM 指令流（stream 2）+ DWT 数据值（stream 1）成功在同一条并口 TPIU、同一次抓包
+  中共存，DWT payload 零丢包。** 恢复了 §0 的"同流同时钟"原始设计。
+- **§11.6 "DWT 数据值包不经并口"的结论作废**：那是 (a) CSTF 配错端口（ENS2 不存在，
+  ITM 是 S1）+ (b) CoreSight 硬件污染 两个因素叠加的假象。
+- **SWO side-track 正式放弃**：并口混流已实证可行，无需 SWO（也就不用碰 D3 电源域/
+  RUN_D3/调试器保活那一堆坑）。
+- 下一步回到 §5：cortrace 的 deframe 多流改造 + nxtrace 模块，把 stream 1 的 DWT
+  数据值包（NuttX 上 = `g_running_tasks` 的新 TCB 指针）解成线程切换事件，叠加到 ETM
+  函数级时间线上。P0 地基（DWT 数据值包上并口）**已打通**。
