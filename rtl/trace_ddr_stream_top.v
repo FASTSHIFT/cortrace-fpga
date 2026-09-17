@@ -557,10 +557,15 @@ module trace_ddr_stream_top #(
     );
 
     // ============ LEDs ============
+    // A7-Lite: LEDs are common-anode (VCC_3V3 -> R -> LED anode -> FPGA pin),
+    // so the FPGA pin is ACTIVE-LOW: drive 0 to light, 1 to dark. Truth of the
+    // status is computed high-active as usual then inverted at the pad.
     reg [24:0] hb = 0;
     always @(posedge clk125) hb <= hb + 1'b1;
-    assign led0 = mmcm_sys_locked;
-    assign led1 = pkt_active ? hb[24] : 1'b0;
+    wire led0_on = mmcm_sys_locked;                 // solid on when PLL locked
+    wire led1_on = pkt_active & hb[24];             // ~3.7 Hz blink while packets in flight
+    assign led0 = ~led0_on;
+    assign led1 = ~led1_on;
 
     assign phy_mdio = 1'bz;
     assign phy_mdc  = 1'b0;
