@@ -557,13 +557,33 @@ module trace_ddr_stream_top #(
     );
 
     // ============ LEDs ============
-    // A7-Lite: LEDs are common-anode (VCC_3V3 -> R -> LED anode -> FPGA pin),
-    // so the FPGA pin is ACTIVE-LOW: drive 0 to light, 1 to dark. Truth of the
-    // status is computed high-active as usual then inverted at the pad.
-    reg [24:0] hb = 0;
-    always @(posedge clk125) hb <= hb + 1'b1;
-    wire led0_on = mmcm_sys_locked;                 // solid on when PLL locked
-    wire led1_on = pkt_active & hb[24];             // ~3.7 Hz blink while packets in flight
+    // A7-Lite LEDs are common-anode (VCC_3V3 -> R -> LED anode -> FPGA pin),
+    // so the pads are ACTIVE-LOW: drive 0 to light, 1 to dark. byte_rate_led
+    // outputs active-high; invert at the pad here.
+    //
+    // Physical mapping on the board:
+    //   led0 (N18, near the Ethernet jack)  <- network TX byte activity  (clk125)
+    //   led1 (M18, near the TRACE header)   <- trace capture activity    (clk200)
+    //
+    // BLINK_BIT=21 gives ~18 Hz at 75 MB/s -> ~0.18 Hz at 750 kB/s (about two
+    // decades of visible dynamic range). Idle threshold ~500 ms per domain.
+
+    wire led0_on;
+    byte_rate_led #(
+        .BLINK_BIT(21), .IDLE_CYCLES(62_500_000), .IDLE_CNT_WIDTH(27)
+    ) u_led_tx (
+        .clk(clk125), .rst(sys_rst),
+        .tick(pkt_tvalid & pkt_tready), .led(led0_on)
+    );
+
+    wire led1_on;
+    byte_rate_led #(
+        .BLINK_BIT(21), .IDLE_CYCLES(100_000_000), .IDLE_CNT_WIDTH(27)
+    ) u_led_cap (
+        .clk(clk200), .rst(rst200),
+        .tick(cap_valid), .led(led1_on)
+    );
+
     assign led0 = ~led0_on;
     assign led1 = ~led1_on;
 

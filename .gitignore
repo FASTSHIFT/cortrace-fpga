@@ -25,3 +25,6 @@ docs/history/refs/*.pdf
 # compiled host helpers (build from source via host/scripts/Makefile)
 host/scripts/stream_grab
 *.gen/
+
+# diag/self-check outputs from host scripts
+bad_bytes.csv

@@ -41,6 +41,7 @@ read_verilog $rtl/la_ddr_writer.v
 read_verilog $rtl/la_ddr_ring_streamer.v
 read_verilog $rtl/fpga_core_net.v
 read_verilog $rtl/dbg_regfile.v
+read_verilog $rtl/byte_rate_led.v
 read_verilog $rtl/trace_ddr_stream_top.v
 
 # ---- reused verilog-ethernet (MAC/UDP/IP/ARP + AXIS) ----

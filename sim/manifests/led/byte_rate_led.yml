@@ -1,0 +1,8 @@
+name: byte_rate_led
+description: "LED indicator toggles at byte-rate / 2^BLINK_BIT, dark on idle, reset-safe"
+sources:
+  - sim/tb/tb_byte_rate_led.v
+  - rtl/byte_rate_led.v
+expect:
+  contains: "RESULT=ALL_PASS"
+tags: [led]
