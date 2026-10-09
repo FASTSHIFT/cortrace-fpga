@@ -24,6 +24,7 @@ Usage:
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -114,7 +115,9 @@ def main():
     perf = os.path.join(PERFTRACE_DIR, f"{a.name}.perftrace")
 
     # capture
-    grab = os.path.join(HERE, "stream_grab")
+    grab = shutil.which("cortrace-grab") or sys.exit(
+        "cortrace-grab not found: install the cortrace package"
+    )
     subprocess.run([grab, a.iface, str(a.seconds), raw, "256", "512"], check=True)
 
     # decode with the chosen time base (memory read straight from the ELF)

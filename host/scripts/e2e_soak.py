@@ -21,6 +21,7 @@ Usage: e2e_soak.py --minutes 5 [--seg-seconds 15] [--elf ...] [--iface] [--ip]
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -101,7 +102,9 @@ def main():
         subprocess.run(["arm-none-eabi-nm", "-n", elf], stdout=f, check=True)
     print(f"ELF={elf}")
 
-    grab = os.path.join(HERE, "stream_grab")
+    grab = shutil.which("cortrace-grab") or sys.exit(
+        "cortrace-grab not found: install the cortrace package"
+    )
     t0 = time.time()
     t_end = t0 + a.minutes * 60
     seg = 0

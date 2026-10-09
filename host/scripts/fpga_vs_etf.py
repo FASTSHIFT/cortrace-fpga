@@ -32,6 +32,7 @@ No LA. No scope. No sweep. No probing. One point, four artifacts, one verdict.
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -158,17 +159,14 @@ def cli_set_pll(m=None, n=None, p=None, q=None, r=None) -> dict:
 
 
 def capture_fpga(out_raw: Path, iface: str, seconds: float) -> int:
-    """Run stream_grab; requires root because of SO_BINDTODEVICE. stream_grab
-    returns rc=1 whenever ANY seq-gaps or ring drops occurred -- that's
+    """Run cortrace-grab (from the cortrace package; no root needed).
+    It returns rc=1 whenever ANY seq-gaps or ring drops occurred -- that's
     still USABLE data (the deframer resyncs), so we accept rc<=1 and just
     log the counts. rc>1 or 0 output = hard fail."""
-    grab = BRINGUP / "scripts" / "stream_grab"
-    if not grab.exists():
-        run(
-            ["gcc", "-O2", "-pthread", "-o", str(grab), str(grab.with_suffix(".c"))],
-            timeout=30,
-        )
-    cmd = ["sudo", "-n", str(grab), iface, str(seconds), str(out_raw)]
+    grab = shutil.which("cortrace-grab")
+    if not grab:
+        raise SystemExit("cortrace-grab not found: install the cortrace package")
+    cmd = [grab, iface, str(seconds), str(out_raw)]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=int(seconds) + 60)
     sys.stdout.write(r.stdout)
     sys.stderr.write(r.stderr)

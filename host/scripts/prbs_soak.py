@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -75,14 +76,16 @@ def main():
     ap.add_argument("--tmp", default="/tmp/prbs_soak_seg.bin")
     a = ap.parse_args()
 
-    grab = os.path.join(HERE, "stream_grab")
-    trace_ctrl = os.path.join(HERE, "trace_ctrl.py")
+    grab = shutil.which("cortrace-grab") or sys.exit(
+        "cortrace-grab not found: install the cortrace package"
+    )
+    trace_ctrl = [sys.executable, "-m", "cortrace", "fpga", "ctrl"]
     block = bytes(P.MARKER) + P.payload_ref(P.PAYLOAD_LEN)
     ref = block * 3
 
     # enable PRBS source
     subprocess.run(
-        [sys.executable, trace_ctrl, "--ip", a.ip, "iddr-prbs", "1"],
+        trace_ctrl + ["--ip", a.ip, "iddr-prbs", "1"],
         check=False,
         stdout=subprocess.DEVNULL,
     )
@@ -137,7 +140,7 @@ def main():
             os.remove(a.tmp)
     finally:
         subprocess.run(
-            [sys.executable, trace_ctrl, "--ip", a.ip, "iddr-prbs", "0"],
+            trace_ctrl + ["--ip", a.ip, "iddr-prbs", "0"],
             check=False,
             stdout=subprocess.DEVNULL,
         )

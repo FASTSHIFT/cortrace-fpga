@@ -24,8 +24,8 @@ print(s.read(2000).decode('latin1').strip().splitlines()[-1] if s.in_waiting or 
 s.close()
 PY
 sleep 0.5
-sudo pkill -9 -x stream_grab 2>/dev/null; sudo fuser -k 5555/udp 2>/dev/null; sleep 1
-sudo "$HERE/stream_grab" "$NIC" 2 "$OUT" 256 512 2>&1 | grep -E "seq-gap|written"
+pkill -9 -x cortrace-grab 2>/dev/null; fuser -k 5555/udp 2>/dev/null; sleep 1
+cortrace-grab "$NIC" 2 "$OUT" 256 512 2>&1 | grep -E "seq-gap|written"
 # Deframe + A-sync health: cortrace-decode --raw searches the nibble phase and
 # --dump-etm writes the winning ETM stream, which is scored for A-sync here.
 # It needs the firmware ELF (ELF=...) like any cortrace-decode run.

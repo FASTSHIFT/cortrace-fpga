@@ -20,7 +20,7 @@ import sys
 import time
 
 try:
-    import fpga_net
+    from cortrace.fpga import net as fpga_net  # from the cortrace package
 except ImportError:
     fpga_net = None
 

@@ -49,8 +49,8 @@ if [ ! -f "$ELF" ]; then
 fi
 arm-none-eabi-nm -n "$ELF" > "$syms"
 
-python3 "$HERE/trace_ctrl.py" rearm >/dev/null 2>&1
-"$HERE/stream_grab" "$NIC" "$SECS" "$raw" 256 512 > /tmp/probe_nx_grab.log 2>&1
+cortrace fpga ctrl rearm >/dev/null 2>&1
+cortrace-grab "$NIC" "$SECS" "$raw" 256 512 > /tmp/probe_nx_grab.log 2>&1
 grep -E "payload|seq-gap|ring-full" /tmp/probe_nx_grab.log
 
 # Full decode of the ETM instruction stream (stream 2), with cycle-time using

@@ -13,7 +13,8 @@
 #   poke  "<cmd>; <cmd>; ..."        run raw openocd -c commands (semicolon sep)
 #   reset                            reset run
 #   uart  <seconds> [pattern]        read DAPLink CDC UART; grep optional pattern
-#   grab  <secs> <out.bin>           rearm FPGA + stream_grab a capture
+#   grab  <secs> <out.bin>           rearm FPGA + cortrace-grab a capture
+#                                    (needs the cortrace package: cortrace, cortrace-grab on PATH)
 #
 # All openocd logs -> /tmp/board_openocd.log ; UART -> /tmp/board_uart.log
 set -u
@@ -116,8 +117,8 @@ PY
 
 cmd_grab() {
     local secs="$1" out="$2"
-    python3 "$HERE/trace_ctrl.py" rearm >/dev/null 2>&1
-    "$HERE/stream_grab" "$NIC" "$secs" "$out" 256 512 > /tmp/board_grab.log 2>&1
+    cortrace fpga ctrl rearm >/dev/null 2>&1
+    cortrace-grab "$NIC" "$secs" "$out" 256 512 > /tmp/board_grab.log 2>&1
     grep -E "payload|seq-gap|ring-full" /tmp/board_grab.log
 }
 
