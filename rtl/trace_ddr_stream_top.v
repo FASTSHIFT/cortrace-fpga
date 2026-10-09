@@ -27,7 +27,8 @@
 //   0x0A  1 -> pause stream (for :5001 CSR readback while stream is running)
 //   0x0B  1 -> use fixed 0x42 source (S1b diagnostic, bypass ramp too)
 //   0x0C  1 -> clear r38 P0-4 diag latches (pkt_tdata bad-byte tap)
-//   0x10  soft reset of trace-capture path
+//   0x10  any write: clear the sticky first error and the counters of the
+//         debug register file (the capture path itself is not touched)
 //
 // Readouts (:5001, 0xFF page):
 //   0xFF50..0xFF6F  DDR-ring status (magic 0xD1) — SAME AS ddr_ring_selftest
@@ -204,11 +205,14 @@ module trace_ddr_stream_top #(
 
     // IDELAY tap CSRs (0x05/0x06/0x07) are gone: the capture front-end has no
     // delay element (IBUF->IDDR direct), so there is nothing to tune.
+    reg         dbg_clr_125 = 0;     // 0x10 (one-cycle pulse into dbg_regfile.clr)
     always @(posedge clk125) begin
+        dbg_clr_125 <= 1'b0;
         if (sys_rst) begin
             selftest_csr <= 0; stream_pause_125 <= 0; src_fixed_125 <= 0;
             diag_clr_125 <= 0; iddr_prbs_125 <= 0;
         end else if (csr_we_w) case (csr_addr_w)
+            8'h10: dbg_clr_125 <= 1'b1;
             8'h08: width_csr      <= (csr_data_w == 8'd2) ? 2'd1 :
                                      (csr_data_w == 8'd1) ? 2'd2 : 2'd0;
             8'h09: selftest_csr   <= csr_data_w[0];
@@ -468,7 +472,7 @@ module trace_ddr_stream_top #(
     wire        dbg_selftx_stuck;
     wire        dbg_tx_fifo_ovf, dbg_rx_fifo_ovf, dbg_rx_bad_frame;
     dbg_regfile u_dbg (
-        .clk(clk125), .rst(sys_rst), .clr(1'b0),
+        .clk(clk125), .rst(sys_rst), .clr(dbg_clr_125),
         .e_no_traceclk(1'b0), .e_mmcm_unlock(1'b0), .e_cap_overflow(overrun_125),
         .e_selftx_stuck(dbg_selftx_stuck), .e_rx_bad_frame(dbg_rx_bad_frame),
         .e_tx_fifo_ovf(dbg_tx_fifo_ovf), .e_rx_fifo_ovf(dbg_rx_fifo_ovf),
@@ -489,7 +493,8 @@ module trace_ddr_stream_top #(
     //   bit1  DDR3 ring buffer between capture and the UDP streamer
     //   bit2  stream self-test sources (CSR 0x09 ramp, CSR 0x0B fixed byte)
     //   bit3  run-time TPIU port width select (CSR 0x08)
-    localparam [7:0] FEATURES = 8'b0000_1110;
+    //   bit4  CSR 0x10 clears the sticky error and counters
+    localparam [7:0] FEATURES = 8'b0001_1110;
     // ============ Readout page mux (:5001) ============
     wire dbg_page  = (ext_addr[15:8] == 8'hFF) &&
                      (ext_addr[7:4] >= 4'h1) && (ext_addr[7:4] <= 4'h4);
