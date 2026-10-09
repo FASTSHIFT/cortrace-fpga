@@ -8,16 +8,17 @@ to the host, decoded by cortrace. See README.md and docs/00-migration-plan.md.
 - **FPGA**: A7-Lite, `xc7a35tfgg484-2`. Program via FT232H (`0403:6014`):
   `openFPGALoader -c ft232 --fpga-part xc7a35tfgg484 <bit>` (SRAM, volatile;
   add `-f` to write QSPI flash so it survives power-off).
-- **FPGA IP = 192.168.10.42** (answers ARP only, no ICMP — normal).
-- **Trace NIC** (direct-attached, e.g. `enxc8a36266dcae`) MUST hold
-  **192.168.10.245**; the FPGA streams to `.245:5555`. After reboot:
-  `sudo ip addr add 192.168.10.245/24 dev <nic>`. Wrong host IP => ARP ok,
-  discover ok, but `:5555` stream is 0 bytes.
+- **FPGA IP = `<FPGA_IP>`** (fixed in the bitstream; see `DEFAULT_FPGA_IP` in
+  cortrace's `python/cortrace/fpga/net.py`). It answers ARP only, no ICMP — normal.
+- **Trace NIC** (direct-attached, `<nic>`) MUST hold **`<HOST_IP>`** (the
+  address the bitstream streams to, port 5555). After reboot:
+  `sudo ip addr add <HOST_IP>/24 dev <nic>`. Wrong host IP => ARP ok,
+  discover ok, but the `:5555` stream is 0 bytes.
 - **Capture tools live in the cortrace package** (`cortrace-grab`, `cortrace fpga
   ctrl|net|health`, `cortrace capture|serve`); install its .deb. `cortrace-grab`
   needs NO privileges on Linux >= 5.7 (verified: 75 MB/s, 0 lost, no caps, no
   sudo); only ARP discovery (`cortrace fpga net`) needs CAP_NET_RAW.
-- **Vivado 2021.1** at `/home/vifextech/tools/Vivado/2021.1/settings64.sh`.
+- **Vivado 2021.1**: `source <vivado-install>/settings64.sh`.
   The DDR3/clock IP `.xci` are pinned to this version.
 - **STM32 target**: firmware in the sibling `stm32h743-etm-trace-firmware`
   repo. OpenOCD reliable halt while selftrace runs: connect under reset —
@@ -40,7 +41,7 @@ to the host, decoded by cortrace. See README.md and docs/00-migration-plan.md.
   cortrace: 0 fatal, balanced, 0 dropped calls).
 
 ## Git
-- Author `VIFEX <vifextech@foxmail.com>` (set as repo-local config once).
+- Commit author: the maintainer's `<name> <email>` (set as repo-local git config once).
 - Conventional-Commit subjects enforced by `.githooks/commit-msg`
   (`scripts/install-hooks.sh` wires `core.hooksPath`). English commit messages.
 - Never write scratch files under `.git/`. Write commit messages with
