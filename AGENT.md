@@ -32,7 +32,7 @@ to the host, decoded by cortrace. See README.md and docs/00-migration-plan.md.
 ## Verify before shipping
 - RTL: `python3 sim/run_verilog_tests.py` (must be all-pass; la_ddr_ring TEST F
   gates the -1024 burst-reorder fix, prbs_cdc_pack gates the lane-skew fix).
-- Host: `cd host/decode && python3 -m pytest`.
+- Host: `cd host/scripts && python3 -m pytest test_itm_capture.py test_commit_msg_hook.py`. Decoding lives in cortrace (the Python decoders in `host/decode/` were retired).
 - Board byte-exact: `host/scripts/prbs_soak.py --minutes N` (framed PRBS, 0
   byte errors expected).
 - Board end-to-end: `host/scripts/e2e_soak.py --minutes N` (real trace through

@@ -15,7 +15,7 @@ Steps at ONE operating point (currently 112.5 MHz, no DIVR1 poke):
      restore HW-FIFO before starting the FPGA capture.
   4. openocd etf_hw_fifo_restore.cfg -> ETF drains to TPIU -> LA/FPGA see it.
   5. stream_grab <secs> -> raw UDP dump captures/fpga_stream_R2.bin
-  6. opencsd_etm4_run --keep -> deframed captures/fpga_R2_etm.bin
+  6. cortrace-decode --raw --dump-etm -> deframed captures/fpga_R2_etm.bin
   7. cortrace-decode --strict --events on BOTH golden and fpga_etm.
      writes logs/{golden,fpga}_R2.events + logs/{golden,fpga}_R2.tsv
      writes perftrace/{golden,fpga}_R2.perftrace
@@ -42,7 +42,10 @@ BRINGUP = HERE.parent
 REPO_ORBTRACE = BRINGUP.parents[2]  # orbtrace/
 WS = REPO_ORBTRACE.parent  # workspace root
 FW_REPO = WS / "stm32h743-etm-trace-firmware"
-CORTRACE_BIN = WS / "cortrace" / "build" / "cortrace-decode"
+CORTRACE_BIN = Path(
+    os.environ.get("CORTRACE_DECODE")
+    or WS / "cortrace" / "build-rel" / "cortrace-decode"
+)
 
 
 def run(cmd, cwd=None, env=None, timeout=180, check=True):
@@ -177,51 +180,38 @@ def capture_fpga(out_raw: Path, iface: str, seconds: float) -> int:
     return n
 
 
-def deframe_fpga(raw: Path, keep_dir: Path) -> Path:
-    """Deframe stream_grab output into clean ETMv4 bytes for cortrace.
+def deframe_fpga(raw: Path, keep_dir: Path, elf: Path, syms: Path) -> Path:
+    """Deframe stream_grab output into clean ETM bytes with cortrace-decode.
 
-    CRITICAL: the FPGA streams one byte per TRACECLK period packed as
-    {trace_a[k] hi-nibble, trace_b[k-1] lo-nibble}. That is NOT a TPIU byte
-    yet -- the half-bit nibbles must be re-assembled with the correct
-    parity/order BEFORE TPIU deframing. A naive tpiu_official.deframe on the
-    raw bytes sees only HSYNC filler (`f7ff...`, 0 FSYNC) and returns garbage.
-    Use opencsd_etm4_run.recover_assemble which searches parity x order and
-    ranks by post-deframe A-sync count (the only signal that proves the whole
-    nibble->frame->stream chain is aligned)."""
+    The FPGA streams one byte per TRACECLK period packed as
+    {trace_a[k] hi-nibble, trace_b[k-1] lo-nibble}. That is NOT a TPIU byte yet:
+    the half-bit nibbles must be re-assembled with the right parity/order before
+    TPIU deframing. `cortrace-decode --raw` searches parity x order, ranks the
+    candidates by post-deframe A-sync count and `--dump-etm` writes the winning
+    stream-2 bytes, so no separate Python deframer is needed."""
     keep_dir.mkdir(parents=True, exist_ok=True)
-    sys.path.insert(0, str(BRINGUP / "decode"))
-    import recover as OC
-    import tpiu_official as T
-    import etm35lib as L
-
-    data = raw.read_bytes()
-    # recover_assemble runs 4 full deframes (parity x order); cap the search
-    # to the first few MB so it stays fast, then apply the winning phase to
-    # the whole capture.
-    head = data[:4_000_000]
-    print(
-        f"[deframe] {len(data)}B raw -> recover_assemble on {len(head)}B ...",
-        flush=True,
-    )
-    score, parity, order, _, fl, v4a, fsync = OC.recover_assemble(head)
-    # Re-assemble the FULL capture with the winning parity/order.
-    sys.path.insert(0, str(BRINGUP / "decode"))
-    import dsl_parse as D  # provides assemble()
-
-    nibs = bytearray()
-    for k in range(len(data) - 1):
-        nibs.append((data[k] >> 4) & 0xF)
-        nibs.append(data[k + 1] & 0xF)
-    assembled = D.assemble(nibs, parity, order)
-    if L.has_tpiu_sync(assembled):
-        etm, _ = T.deframe(assembled, want_stream=2)
-    else:
-        etm = assembled
     out = keep_dir / "etm.bin"
-    out.write_bytes(etm)
+    if not CORTRACE_BIN.exists():
+        raise SystemExit(f"missing {CORTRACE_BIN} (set CORTRACE_DECODE)")
+    cmd = [
+        str(CORTRACE_BIN),
+        str(raw),
+        str(syms),
+        "--elf",
+        str(elf),
+        "--raw",
+        "--dump-etm",
+        str(out),
+        "--memory-limit-mb",
+        "512",
+    ]
+    r = run(cmd, timeout=300, check=False)
+    if r is None or not out.exists():
+        raise SystemExit(
+            f"cortrace-decode --raw produced no ETM bytes; check {keep_dir}"
+        )
     print(
-        f"[deframe] parity={parity} order={order} fsync={fsync} "
-        f"pre-async={v4a} -> {len(etm)}B ETM (stream 2) -> {out}",
+        f"[deframe] {raw.stat().st_size}B raw -> {out.stat().st_size}B ETM -> {out}",
         flush=True,
     )
     return out
@@ -389,7 +379,7 @@ def main():
 
     # 5) deframe FPGA -> ETM
     fpga_keep = logs / f"_fpga_keep_{a.tag}"
-    fpga_etm = deframe_fpga(fpga_raw, fpga_keep)
+    fpga_etm = deframe_fpga(fpga_raw, fpga_keep, elf, ref_dir / "syms.nm")
     if not fpga_etm.exists():
         raise SystemExit(f"deframe produced no ETM bytes; check {fpga_keep}")
     # Symlink into captures/ with a friendly name

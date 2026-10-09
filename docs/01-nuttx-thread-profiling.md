@@ -372,8 +372,8 @@ flowchart LR
 
 | 复用 | 位置 |
 |------|------|
-| TPIU deframe（want_stream 语义）| `cortrace/src/deframe.cpp`、`cortrace-fpga/host/decode/tpiu_official.py` |
-| FPGA 全局时间基（每 RAW 字节 1 ns）| `cortrace-fpga/host/decode/make_timebase.py` |
+| TPIU deframe（want_stream 语义）| `cortrace/src/deframe.cpp`（原 `host/decode/tpiu_official.py` 已淘汰）|
+| FPGA 全局时间基（每 RAW 字节 1 ns）| `cortrace-decode --time`（原 `host/decode/make_timebase.py` 已淘汰）|
 | ETM 指令解码 + callstack | `cortrace/src/opencsd_decoder.cpp`、`callstack.cpp` |
 | Perfetto 导出 | `cortrace/src/perfetto_writer.cpp` |
 | ELF 直读（PT_LOAD 段）| cortrace `add_elf()`（已有）|

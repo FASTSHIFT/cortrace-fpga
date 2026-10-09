@@ -43,7 +43,7 @@ stack, SysTick exceptions rendered) across BB=0/1 and SysTick on/off.
 | `rtl/ddr3/ip/` | Xilinx MIG DDR3 + clocking wizard IP (`.xci`, Vivado 2021.1) |
 | `rtl/external/verilog-ethernet` | Alex Forencich MAC/UDP/IP/ARP + AXIS (submodule) |
 | `fpga_flow/` | Vivado build TCL (`build_trace_stream.tcl`) |
-| `host/decode/` | Deframe helpers + host-side phase search (etm35lib, tpiu_official, recover, make_timebase) |
+| decode / align / fuse | Not in this repo: provided by cortrace (`cortrace-decode`, `scripts/cortrace_fuse.py`) |
 | `host/scripts/` | Capture (`stream_grab`), CSR control (`trace_ctrl`), PRBS/e2e soak, golden cross-check |
 | `host/target/` | OpenOCD configs for the STM32H743 target |
 | `sim/` | Icarus Verilog manifest regression (`run_verilog_tests.py`) |
@@ -73,7 +73,7 @@ cortrace-decode cap.bin mem.bin 08000000 syms.nm --raw --perf out.perftrace
 
 ```sh
 python3 sim/run_verilog_tests.py          # RTL testbenches
-cd host/decode && python3 -m pytest        # deframe unit tests
+cd host/scripts && python3 -m pytest test_itm_capture.py test_commit_msg_hook.py   # capture-script tests
 ```
 
 ## Related repos

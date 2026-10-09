@@ -42,7 +42,7 @@ flowchart TD
 | `rtl/ddr3/ip/` | Xilinx MIG DDR3 + 时钟向导 IP（`.xci`，Vivado 2021.1） |
 | `rtl/external/verilog-ethernet` | Alex Forencich 的 MAC/UDP/IP/ARP + AXIS（子模块） |
 | `fpga_flow/` | Vivado 构建 TCL（`build_trace_stream.tcl`） |
-| `host/decode/` | deframe 辅助 + 主机侧相位搜索（etm35lib、tpiu_official、recover、make_timebase） |
+| 解码 / 对齐 / 融合 | 不在本仓库：由 cortrace 提供（`cortrace-decode`、`scripts/cortrace_fuse.py`） |
 | `host/scripts/` | 采集（`stream_grab`）、CSR 控制（`trace_ctrl`）、PRBS/端到端压测、golden 对拍 |
 | `host/target/` | STM32H743 目标板的 OpenOCD 配置 |
 | `sim/` | Icarus Verilog manifest 回归（`run_verilog_tests.py`） |
@@ -72,7 +72,7 @@ cortrace-decode cap.bin mem.bin 08000000 syms.nm --raw --perf out.perftrace
 
 ```sh
 python3 sim/run_verilog_tests.py          # RTL 测试平台
-cd host/decode && python3 -m pytest        # deframe 单元测试
+cd host/scripts && python3 -m pytest test_itm_capture.py test_commit_msg_hook.py   # 采集脚本测试
 ```
 
 ## 相关仓库

@@ -26,16 +26,20 @@ PY
 sleep 0.5
 sudo pkill -9 -x stream_grab 2>/dev/null; sudo fuser -k 5555/udp 2>/dev/null; sleep 1
 sudo "$HERE/stream_grab" "$NIC" 2 "$OUT" 256 512 2>&1 | grep -E "seq-gap|written"
-# Deframe + A-sync health via the shared recover module (same phase search the
-# C++ cortrace-decode --raw uses). No intermediate file, no slow trc_pkt_lister.
-python3 - "$OUT" "$TAG" "$HERE/../decode" <<'PY'
+# Deframe + A-sync health: cortrace-decode --raw searches the nibble phase and
+# --dump-etm writes the winning ETM stream, which is scored for A-sync here.
+# It needs the firmware ELF (ELF=...) like any cortrace-decode run.
+: "${ELF:?set ELF to the firmware ELF the target is running}"
+DECODE="${CORTRACE_DECODE:-$HERE/../../../cortrace/build-rel/cortrace-decode}"
+SYMS=/tmp/syms_${TAG}.nm
+arm-none-eabi-nm -n "$ELF" > "$SYMS"
+head -c 40000000 "$OUT" > "$OUT.head"
+"$DECODE" "$OUT.head" "$SYMS" --elf "$ELF" --raw --dump-etm "$ETM" --memory-limit-mb 0 \
+    >/dev/null 2>"$ETM.log" || { echo "cortrace-decode failed, see $ETM.log"; exit 1; }
+PHASE=$(grep -oE "phase=\(parity=[0-9]+,order=[0-9]+\)" "$ETM.log" | head -1)
+python3 - "$ETM" "$TAG" "$PHASE" <<'PY'
 import sys
-sys.path.insert(0, sys.argv[3])
-import recover as R
-import tpiu_official as T
-raw = open(sys.argv[1], "rb").read(40_000_000)
-_, parity, order, data, _, _, _ = R.recover_assemble(raw)
-etm, _ = T.deframe(data, want_stream=2)
+etm = open(sys.argv[1], "rb").read()
 good = bad = zc = 0
 for c in etm:
     if c == 0:
@@ -45,6 +49,6 @@ for c in etm:
             good += (zc >= 11); bad += (zc < 11)
         zc = 0
 tot = good + bad
-print(f"[{sys.argv[2]}] etm={len(etm)}B parity={parity} order={order} "
+print(f"[{sys.argv[2]}] etm={len(etm)}B {sys.argv[3]} "
       f"good-async={good} bad-async={bad} bad%={100*bad/max(1,tot):.2f}%")
 PY

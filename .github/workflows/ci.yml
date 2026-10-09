@@ -34,17 +34,15 @@ jobs:
           path: sim-results.xml
           if-no-files-found: ignore
 
-  host-decode:
-    # Python unit tests for the deframe front-end (etm35lib decode + timebase).
+  host-scripts:
+    # Python unit tests for the host capture scripts.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install 'pytest>=8.3.5' numpy
-      - name: Run host decode tests
-        run: cd host/decode && python3 -m pytest -v test_etm35lib.py test_etm35_golden.py test_fpga_timebase.py
+      - run: pip install 'pytest>=8.3.5'
       - name: Run host script tests (capture wrapper, commit-msg hook)
         run: cd host/scripts && python3 -m pytest -v test_itm_capture.py test_commit_msg_hook.py
 
