@@ -31,6 +31,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -46,6 +47,8 @@ def _default_cortrace():
 CORTRACE = os.environ.get("CORTRACE_DECODE", _default_cortrace())
 PERFETTO_OPEN = os.path.join(WORKSPACE, "cortrace", "scripts", "perfetto_open.py")
 STREAM_GRAB = os.path.join(HERE, "stream_grab")
+# All trace artifacts (raw captures, Perfetto files) go to <workspace>/perftrace.
+OUT_DIR = os.path.join(WORKSPACE, "perftrace")
 TRACE_CTRL = os.path.join(HERE, "trace_ctrl.py")
 
 
@@ -110,7 +113,16 @@ def main(argv=None):
         "--phase", default=None, help="lock deframe phase, e.g. 1,0 (default: search)"
     )
     # visualize
-    ap.add_argument("--save", default=None, help="also keep the .perfetto here")
+    ap.add_argument(
+        "--save",
+        default=None,
+        help="write the .perfetto here (default: perftrace/hw_<tag>.perfetto)",
+    )
+    ap.add_argument(
+        "--tag",
+        default=time.strftime("%Y%m%d-%H%M%S"),
+        help="name suffix for the files in perftrace/",
+    )
     ap.add_argument("--keep", action="store_true", help="perfetto_open --keep")
     ap.add_argument("--no-open", dest="do_open", action="store_false")
     ap.add_argument("--port", type=int, default=0, help="perfetto_open port")
@@ -134,7 +146,8 @@ def main(argv=None):
             sys.exit(f"--raw-in not found: {raw}")
         print(f"[cortrace-live] using existing raw {raw}", file=sys.stderr)
     else:
-        raw = os.path.join(tempfile.gettempdir(), "cortrace_live.bin")
+        os.makedirs(OUT_DIR, exist_ok=True)
+        raw = os.path.join(OUT_DIR, f"raw_{a.tag}.bin")
         grab_cmd = [STREAM_GRAB, a.iface, str(a.secs), raw, "256", "512"]
         if a.sudo:
             grab_cmd = ["sudo"] + grab_cmd
@@ -144,7 +157,8 @@ def main(argv=None):
 
     # optional: truncate to the first N bytes for a browser-friendly preview
     if a.head_bytes > 0:
-        head = os.path.join(tempfile.gettempdir(), "cortrace_live_head.bin")
+        os.makedirs(OUT_DIR, exist_ok=True)
+        head = os.path.join(OUT_DIR, f"raw_{a.tag}_head.bin")
         with open(raw, "rb") as src, open(head, "wb") as dst:
             dst.write(src.read(a.head_bytes))
         sz = os.path.getsize(head)
@@ -158,7 +172,8 @@ def main(argv=None):
     if a.save:
         perf = a.save
     else:
-        perf = os.path.join(tempfile.gettempdir(), "cortrace_live.perfetto")
+        os.makedirs(OUT_DIR, exist_ok=True)
+        perf = os.path.join(OUT_DIR, f"hw_{a.tag}.perfetto")
     syms = build_syms(a.elf)
 
     if a.time_base == "cycle":
