@@ -31,7 +31,16 @@
 //
 // Readouts (:5001, 0xFF page):
 //   0xFF50..0xFF6F  DDR-ring status (magic 0xD1) — SAME AS ddr_ring_selftest
-//   0xFF70..0xFF73  BUILD_ID (LE)
+//   0xFF70..0xFF73  BUILD_ID (LE): Unix time of synthesis
+//   0xFF74          VERSION patch      \
+//   0xFF75          VERSION minor       } the cortrace-fpga VERSION file
+//   0xFF76          VERSION major      /
+//   0xFF77          VERSION flags: bit0 working tree was dirty, bit1 pre-release
+//                   suffix in VERSION, bit2 HEAD is not the v<VERSION> tag
+//   0xFF78..0xFF7B  git commit (first 8 hex digits, LE)
+//   0xFF7C          FEATURES bitmap (see localparam FEATURES below)
+//   0xFF7E          ID block marker 0xFA (reads 0 on bitstreams without it)
+//   0xFF7F          ID block format (1)
 //   0xFF80..0xFF94  r38 P0-4 bad-byte diag latch (magic 0xD2)
 //   -- from dbg_regfile (existing) at 0xFF10..0xFF4F
 //
@@ -53,7 +62,11 @@ module trace_ddr_stream_top #(
     parameter integer PKT_WORDS     = 64,       // 128-bit words per UDP packet
     parameter integer STREAM_PAYLOAD= 1024,     // trace bytes per UDP packet
     parameter integer STREAM_FIFO_DEPTH = 8192, // la_ddr_writer input CDC FIFO
-    parameter [31:0] BUILD_ID       = 32'hDEADBEEF
+    parameter [31:0] BUILD_ID       = 32'hDEADBEEF,
+    // Stamped by fpga_flow/build_trace_stream.tcl from the VERSION file and git.
+    parameter [23:0] VERSION_WORD   = 24'h000000,   // {major, minor, patch}
+    parameter  [7:0] VERSION_FLAGS  = 8'h00,
+    parameter [31:0] GIT_HASH       = 32'h00000000
 ) (
     input  wire        sys_clk_50,
     input  wire        rst_n,
@@ -469,6 +482,14 @@ module trace_ddr_stream_top #(
         .addr(ext_addr[7:0]), .rdata(dbg_rdata)
     );
 
+    // What this bitstream actually implements, so the host can tell "not
+    // present" from "reads zero". Keep in step with cortrace fpga health.
+    //   bit0  TRACECLK activity / pin-edge / frequency / gap monitors are wired
+    //         (here they are NOT: dbg_regfile gets constant 0 for them)
+    //   bit1  DDR3 ring buffer between capture and the UDP streamer
+    //   bit2  stream self-test sources (CSR 0x09 ramp, CSR 0x0B fixed byte)
+    //   bit3  run-time TPIU port width select (CSR 0x08)
+    localparam [7:0] FEATURES = 8'b0000_1110;
     // ============ Readout page mux (:5001) ============
     wire dbg_page  = (ext_addr[15:8] == 8'hFF) &&
                      (ext_addr[7:4] >= 4'h1) && (ext_addr[7:4] <= 4'h4);
@@ -499,6 +520,17 @@ module trace_ddr_stream_top #(
         (ext_addr == 16'hFF71) ? BUILD_ID[15:8]      :
         (ext_addr == 16'hFF72) ? BUILD_ID[23:16]     :
         (ext_addr == 16'hFF73) ? BUILD_ID[31:24]     :
+        (ext_addr == 16'hFF74) ? VERSION_WORD[7:0]   :
+        (ext_addr == 16'hFF75) ? VERSION_WORD[15:8]  :
+        (ext_addr == 16'hFF76) ? VERSION_WORD[23:16] :
+        (ext_addr == 16'hFF77) ? VERSION_FLAGS       :
+        (ext_addr == 16'hFF78) ? GIT_HASH[7:0]       :
+        (ext_addr == 16'hFF79) ? GIT_HASH[15:8]      :
+        (ext_addr == 16'hFF7A) ? GIT_HASH[23:16]     :
+        (ext_addr == 16'hFF7B) ? GIT_HASH[31:24]     :
+        (ext_addr == 16'hFF7C) ? FEATURES            :
+        (ext_addr == 16'hFF7E) ? 8'hFA               :   // ID block marker
+        (ext_addr == 16'hFF7F) ? 8'h01               :   // ID block format
         (ext_addr == 16'hFF80) ? 8'hD2               :   // MAGIC: diag latches
         (ext_addr == 16'hFF81) ? {6'b0, src_fixed_125, bad_byte_latched} :
         (ext_addr == 16'hFF82) ? bad_byte_val        :

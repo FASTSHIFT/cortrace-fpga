@@ -90,10 +90,37 @@ read_xdc $rtl/trace_ddr_stream.xdc
 
 set build_id [clock seconds]
 puts "BUILD_ID = $build_id ([clock format $build_id])"
+# ---- design version: VERSION file + git, stamped into the readout registers
+# 0xFF70.. (cortrace fpga health prints them). VERSION is X.Y.Z[suffix].
+set fh [open $root/VERSION r]
+set ver [string trim [read $fh]]
+close $fh
+if {![regexp {^(\d+)\.(\d+)\.(\d+)(.*)$} $ver -> v_maj v_min v_pat v_suffix]} {
+    error "VERSION '$ver' is not X.Y.Z[suffix]"
+}
+set ver_word [expr {($v_maj << 16) | ($v_min << 8) | $v_pat}]
+set ver_flags 0
+set git_hash 0
+set git_txt  "no git"
+if {![catch {exec git -C $root rev-parse --short=8 HEAD} head]} {
+    scan $head %x git_hash
+    set git_txt $head
+    if {[exec git -C $root status --porcelain] ne ""} {
+        set ver_flags [expr {$ver_flags | 1}]
+        append git_txt "-dirty"
+    }
+    if {[catch {exec git -C $root describe --tags --exact-match HEAD} tag] || $tag ne "v$ver"} {
+        set ver_flags [expr {$ver_flags | 4}]
+    }
+}
+if {$v_suffix ne ""} { set ver_flags [expr {$ver_flags | 2}] }
+puts "VERSION = $ver  git = $git_txt  flags = $ver_flags"
 # Capture front-end is IBUF->IDDR direct (no IDELAY): the centre-aligned STM32
 # data is sampled on the TRACECLK edge, frequency-independent -- one bitstream
 # covers every TRACECLK the board SI supports. See docs/history/.../30-*.md.
-synth_design -top trace_ddr_stream_top -part $part -generic BUILD_ID=$build_id
+synth_design -top trace_ddr_stream_top -part $part -generic BUILD_ID=$build_id \
+    -generic VERSION_WORD=$ver_word -generic VERSION_FLAGS=$ver_flags \
+    -generic GIT_HASH=$git_hash
 
 puts "==== CLOCKS ===="
 foreach c [get_clocks] { puts "  clock: $c  period=[get_property PERIOD $c]  src=[get_property SOURCE_PINS $c]" }

@@ -48,6 +48,15 @@ to the host, decoded by cortrace. See README.md and docs/00-migration-plan.md.
   `git commit -m` in the terminal.
 - Push is the user's job.
 
+## Versioning
+`VERSION` (X.Y.Z) is the design version. `fpga_flow/build_trace_stream.tcl` stamps it, the git
+commit, flags (dirty / pre-release / not-a-tag) and the synthesis time (`BUILD_ID`, Unix time) into
+the readout registers `0xFF70..0xFF7F`, plus a `FEATURES` bitmap of what the bitstream implements.
+`cortrace fpga health` prints them (read over UDP :5001, no JTAG). Bump `VERSION` for any change to
+the register map or the datapath, and build releases from a clean tree at the `v<VERSION>` tag. When
+you add or wire a monitor, update `FEATURES` in `trace_ddr_stream_top.v` and the host side in
+cortrace `fpga/health.py` together.
+
 ## Key finding baked into the design
 The STM32 TPIU drives the parallel port **centre-aligned** (data stable around
 the TRACECLK edge, LA-confirmed), so the capture is plain IBUF→IDDR edge
