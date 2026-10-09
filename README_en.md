@@ -43,8 +43,8 @@ stack, SysTick exceptions rendered) across BB=0/1 and SysTick on/off.
 | `rtl/ddr3/ip/` | Xilinx MIG DDR3 + clocking wizard IP (`.xci`, Vivado 2021.1) |
 | `rtl/external/verilog-ethernet` | Alex Forencich MAC/UDP/IP/ARP + AXIS (submodule) |
 | `fpga_flow/` | Vivado build TCL (`build_trace_stream.tcl`) |
-| decode / align / fuse | Not in this repo: provided by cortrace (`cortrace-decode`, `scripts/cortrace_fuse.py`) |
-| `host/scripts/` | Capture (`stream_grab`), CSR control (`trace_ctrl`), PRBS/e2e soak, golden cross-check |
+| capture / CSR control / decode / align / fuse | Not in this repo: provided by the [cortrace](https://github.com/FASTSHIFT/cortrace) .deb (`cortrace`, `cortrace-grab`, `cortrace-decode`) |
+| `host/scripts/` | Small board-debug tools: PRBS/e2e soak, golden cross-check, probe captures (need the cortrace package installed) |
 | `host/target/` | OpenOCD configs for the STM32H743 target |
 | `sim/` | Icarus Verilog manifest regression (`run_verilog_tests.py`) |
 | `docs/history/` | Design/review/root-cause record of the bring-up |
@@ -59,21 +59,20 @@ vivado -mode batch -source ../fpga_flow/build_trace_stream.tcl
 
 ## Capture + decode
 
-```sh
-# one-time: let stream_grab bind-to-device + big rcvbuf without sudo
-sudo setcap 'cap_net_raw,cap_net_admin+ep' host/scripts/stream_grab
+The host tools live in the cortrace package (download `cortrace_*_amd64.deb` from its GitHub release and `sudo apt install ./cortrace_*.deb`). No privileges are needed:
 
-host/scripts/stream_grab <iface> <secs> cap.bin 256 512
-# cortrace-decode --raw deframes the capture in-process (nibble reassemble +
-# TPIU stream 2), so no separate deframe step is needed.
-cortrace-decode cap.bin mem.bin 08000000 syms.nm --raw --perf out.perftrace
+```sh
+export CORTRACE_OUT_DIR=~/traces               # always explicit; cortrace never picks a location
+cortrace fpga ctrl set-width 4                 # FPGA TPIU width / re-arm
+cortrace capture --iface <nic> --elf fw.elf --secs 1   # capture + decode to Perfetto
+cortrace serve --iface <nic> --elf fw.elf               # press Start in ui.perfetto.dev to capture
 ```
 
 ## Test
 
 ```sh
 python3 sim/run_verilog_tests.py          # RTL testbenches
-cd host/scripts && python3 -m pytest test_itm_capture.py test_commit_msg_hook.py   # capture-script tests
+cd host/scripts && python3 -m pytest test_commit_msg_hook.py   # commit-msg hook tests
 ```
 
 ## Related repos

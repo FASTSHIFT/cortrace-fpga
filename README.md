@@ -42,8 +42,8 @@ flowchart TD
 | `rtl/ddr3/ip/` | Xilinx MIG DDR3 + 时钟向导 IP（`.xci`，Vivado 2021.1） |
 | `rtl/external/verilog-ethernet` | Alex Forencich 的 MAC/UDP/IP/ARP + AXIS（子模块） |
 | `fpga_flow/` | Vivado 构建 TCL（`build_trace_stream.tcl`） |
-| 解码 / 对齐 / 融合 | 不在本仓库：由 cortrace 提供（`cortrace-decode`、`scripts/cortrace_fuse.py`） |
-| `host/scripts/` | 采集（`stream_grab`）、CSR 控制（`trace_ctrl`）、PRBS/端到端压测、golden 对拍 |
+| 采集 / CSR 控制 / 解码 / 对齐 / 融合 | 不在本仓库：由 [cortrace](https://github.com/FASTSHIFT/cortrace) 的 deb 包提供（`cortrace`、`cortrace-grab`、`cortrace-decode`） |
+| `host/scripts/` | 板级调试小工具：PRBS/端到端压测、golden 对拍、探针采集（依赖已安装的 cortrace 包） |
 | `host/target/` | STM32H743 目标板的 OpenOCD 配置 |
 | `sim/` | Icarus Verilog manifest 回归（`run_verilog_tests.py`） |
 | `docs/history/` | bring-up 阶段的设计/评审/根因记录 |
@@ -58,21 +58,20 @@ vivado -mode batch -source ../fpga_flow/build_trace_stream.tcl
 
 ## 采集 + 解码
 
-```sh
-# 一次性：让 stream_grab 无需 sudo 即可绑定网卡 + 使用大接收缓冲
-sudo setcap 'cap_net_raw,cap_net_admin+ep' host/scripts/stream_grab
+主机侧工具全部在 cortrace 包里（从 GitHub Release 下载 `cortrace_*_amd64.deb`，`sudo apt install ./cortrace_*.deb`），无需特权：
 
-host/scripts/stream_grab <网卡> <秒数> cap.bin 256 512
-# cortrace-decode --raw 在进程内完成 deframe（nibble 重组 + TPIU stream 2），
-# 无需单独的 deframe 步骤。
-cortrace-decode cap.bin mem.bin 08000000 syms.nm --raw --perf out.perftrace
+```sh
+export CORTRACE_OUT_DIR=~/traces               # 输出目录必须显式指定，cortrace 不会自己选
+cortrace fpga ctrl set-width 4                 # FPGA 的 TPIU 位宽 / 重新武装
+cortrace capture --iface <网卡> --elf fw.elf --secs 1   # 抓取 + 解码，生成 Perfetto
+cortrace serve --iface <网卡> --elf fw.elf               # 在 ui.perfetto.dev 点 Start 即抓取
 ```
 
 ## 测试
 
 ```sh
 python3 sim/run_verilog_tests.py          # RTL 测试平台
-cd host/scripts && python3 -m pytest test_itm_capture.py test_commit_msg_hook.py   # 采集脚本测试
+cd host/scripts && python3 -m pytest test_commit_msg_hook.py   # 提交信息 hook 测试
 ```
 
 ## 相关仓库

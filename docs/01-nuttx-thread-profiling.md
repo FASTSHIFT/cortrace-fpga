@@ -744,9 +744,9 @@ STM32H743 (NuttX, board-level bring-up only)          Artix-7 FPGA        Host (
 
 ```bash
 # 1. 抓包（不要碰 openocd —— 调试器连接会清 DWT）
-host/scripts/stream_grab <nic> 1 capture.bin 256 512
+cortrace-grab <nic> 1 capture.bin 256 512
 # 2. dump 活线程名映射（抓包之后，只读活 g_pidhash 条目，无 UAF）
-cortrace/scripts/nx_tcbmap.py --elf nuttx --out tcbmap.txt
+cortrace tcbmap --elf nuttx --out tcbmap.txt
 # 3. 解码 → 每线程泳道 + 调用栈 + cycle 执行时间 → Perfetto
 cortrace-decode --raw --nx-switch-stream 1 --nx-tcbmap tcbmap.txt \
     --cycle-time --sysclk-hz 150000000 \

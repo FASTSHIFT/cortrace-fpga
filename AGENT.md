@@ -13,16 +13,17 @@ to the host, decoded by cortrace. See README.md and docs/00-migration-plan.md.
   **192.168.10.245**; the FPGA streams to `.245:5555`. After reboot:
   `sudo ip addr add 192.168.10.245/24 dev <nic>`. Wrong host IP => ARP ok,
   discover ok, but `:5555` stream is 0 bytes.
-- **stream_grab without sudo**: `sudo setcap 'cap_net_raw,cap_net_admin+ep'
-  host/scripts/stream_grab` (needs bind-to-device + large SO_RCVBUF). Also
-  `sudo sysctl -w net.core.rmem_max=268435456` if not using caps.
+- **Capture tools live in the cortrace package** (`cortrace-grab`, `cortrace fpga
+  ctrl|net|health`, `cortrace capture|serve`); install its .deb. `cortrace-grab`
+  needs NO privileges on Linux >= 5.7 (verified: 75 MB/s, 0 lost, no caps, no
+  sudo); only ARP discovery (`cortrace fpga net`) needs CAP_NET_RAW.
 - **Vivado 2021.1** at `/home/vifextech/tools/Vivado/2021.1/settings64.sh`.
   The DDR3/clock IP `.xci` are pinned to this version.
 - **STM32 target**: firmware in the sibling `stm32h743-etm-trace-firmware`
   repo. OpenOCD reliable halt while selftrace runs: connect under reset —
   `-c "reset_config srst_only connect_assert_srst"` then `reset halt`.
 - Port :5555 often held by a stale grab: `sudo fuser -k 5555/udp` or
-  `pkill -9 -x stream_grab`.
+  `pkill -9 -x cortrace-grab`.
 
 ## Build discipline
 - Long Vivado builds: run in the background with the log redirected to a file;
@@ -32,7 +33,7 @@ to the host, decoded by cortrace. See README.md and docs/00-migration-plan.md.
 ## Verify before shipping
 - RTL: `python3 sim/run_verilog_tests.py` (must be all-pass; la_ddr_ring TEST F
   gates the -1024 burst-reorder fix, prbs_cdc_pack gates the lane-skew fix).
-- Host: `cd host/scripts && python3 -m pytest test_itm_capture.py test_commit_msg_hook.py`. Decoding lives in cortrace (the Python decoders in `host/decode/` were retired).
+- Host: `cd host/scripts && python3 -m pytest test_commit_msg_hook.py`. Capture, decoding and fusion live in cortrace (the Python decoders in `host/decode/` were retired; `stream_grab`/`trace_ctrl`/`fpga_net`/`fpga_health`/`itm_capture`/`cortrace_live` moved there).
 - Board byte-exact: `host/scripts/prbs_soak.py --minutes N` (framed PRBS, 0
   byte errors expected).
 - Board end-to-end: `host/scripts/e2e_soak.py --minutes N` (real trace through
