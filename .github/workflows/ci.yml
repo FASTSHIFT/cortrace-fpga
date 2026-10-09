@@ -45,8 +45,8 @@ jobs:
       - run: pip install 'pytest>=8.3.5' numpy
       - name: Run host decode tests
         run: cd host/decode && python3 -m pytest -v test_etm35lib.py test_etm35_golden.py test_fpga_timebase.py
-      - name: Run host script tests (NuttX note alignment / fuse / tcbmap)
-        run: cd host/scripts && python3 -m pytest -v test_align_check.py test_itm_capture.py test_nx_tcbmap.py test_commit_msg_hook.py
+      - name: Run host script tests (capture wrapper, commit-msg hook)
+        run: cd host/scripts && python3 -m pytest -v test_itm_capture.py test_commit_msg_hook.py
 
   format:
     # Formatting gate: Python via black --check, Verilog whitespace invariants.

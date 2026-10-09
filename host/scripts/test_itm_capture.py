@@ -1,6 +1,5 @@
-"""Unit tests for itm_capture.fuse (Perfetto merge by sequence-id remap)."""
+"""Unit tests for itm_capture: grab, then delegate to cortrace_fuse."""
 
-import json
 import os
 import sys
 import types
@@ -11,69 +10,100 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import itm_capture as ic  # noqa: E402
 
 
-class FakePacket:
-    def __init__(self, seq):
-        self.trusted_packet_sequence_id = seq
-
-
-class FakeTrace:
-    """Stand-in for perfetto_trace_pb2.Trace: JSON on the wire, one field."""
-
-    def __init__(self):
-        self.packet = []
-
-    def ParseFromString(self, data):
-        self.packet = [FakePacket(s) for s in json.loads(data)]
-
-    def SerializeToString(self):
-        return json.dumps([p.trusted_packet_sequence_id for p in self.packet]).encode()
-
-
-FAKE_PB2 = types.SimpleNamespace(Trace=FakeTrace)
-
-
-def test_fuse_appends_remapped_note_trace_and_keeps_hw_bytes(tmp_path):
-    hw = tmp_path / "hw.perfetto"
-    hw_bytes = b"\x00\x01hardware-bytes\xff" * 1000
-    hw.write_bytes(hw_bytes)
-    note = tmp_path / "note.pftrace"
-    note.write_bytes(json.dumps([1, 2, 0, 2]).encode())
-    out = tmp_path / "fused.perfetto"
-
-    remapped = ic.fuse(str(hw), str(note), str(out), pb2=FAKE_PB2)
-
-    data = out.read_bytes()
-    assert remapped == 3  # sequence id 0 (legacy) is left alone
-    assert data.startswith(hw_bytes)  # hardware file is copied untouched
-    assert json.loads(data[len(hw_bytes) :]) == [1001, 1002, 0, 1002]
-
-
-def test_fuse_streams_large_hw_file(tmp_path):
-    hw = tmp_path / "hw.perfetto"
-    size = 17 * 1024 * 1024  # more than one 16 MiB chunk
-    hw.write_bytes(b"\xab" * size)
-    note = tmp_path / "note.pftrace"
-    note.write_bytes(b"[]")
-    out = tmp_path / "fused.perfetto"
-    ic.fuse(str(hw), str(note), str(out), pb2=FAKE_PB2)
-    assert out.stat().st_size == size + len(b"[]")
-
-
-def test_missing_pynuttx_is_an_argument_error(monkeypatch, capsys):
-    monkeypatch.delenv("PYNUTTX", raising=False)
-    monkeypatch.setattr(sys, "argv", ["itm_capture.py", "--elf", "x.elf"])
-    with pytest.raises(SystemExit) as e:
-        ic.main()
-    assert e.value.code == 2
-    assert "--pynuttx" in capsys.readouterr().err
+@pytest.fixture
+def fake_cortrace(tmp_path):
+    scripts = tmp_path / "cortrace" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "cortrace_fuse.py").write_text("", encoding="utf-8")
+    return str(tmp_path / "cortrace")
 
 
 def test_missing_iface_needs_raw_in(monkeypatch, capsys):
     monkeypatch.delenv("CORTRACE_IFACE", raising=False)
-    monkeypatch.setattr(
-        sys, "argv", ["itm_capture.py", "--elf", "x.elf", "--pynuttx", "/p"]
-    )
     with pytest.raises(SystemExit) as e:
-        ic.main()
+        ic.parse_args(["--elf", "x.elf"])
     assert e.value.code == 2
     assert "--iface" in capsys.readouterr().err
+
+
+def test_raw_in_needs_no_iface(monkeypatch):
+    monkeypatch.delenv("CORTRACE_IFACE", raising=False)
+    a, rest = ic.parse_args(["--raw-in", "r.bin", "--elf", "x.elf", "--open"])
+    assert a.iface is None
+    assert rest == ["--elf", "x.elf", "--open"]  # unknown options are forwarded
+
+
+def test_cortrace_dir_from_environment(monkeypatch):
+    monkeypatch.setenv("CORTRACE_DIR", "/some/cortrace")
+    assert ic.default_cortrace_dir() == "/some/cortrace"
+    monkeypatch.delenv("CORTRACE_DIR")
+    assert ic.default_cortrace_dir().endswith("cortrace")
+
+
+def test_grab_then_fuse(monkeypatch, tmp_path, fake_cortrace):
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        calls.append([str(c) for c in cmd])
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(ic.subprocess, "run", fake_run)
+    rc = ic.main(
+        [
+            "--iface", "eth9",
+            "--cortrace-dir", fake_cortrace,
+            "--out-dir", str(tmp_path / "out"),
+            "--tag", "t",
+            "--secs", "2",
+            "--width", "2",
+            "--elf", "x.elf",
+        ]
+    )  # fmt: skip
+    assert rc == 0
+    set_width, grab, fuse = calls
+    assert set_width[-2:] == ["set-width", "2"]
+    assert grab[1:4] == ["eth9", "2.0", str(tmp_path / "out" / "raw_t.bin")]
+    assert fuse[1].endswith("scripts/cortrace_fuse.py")
+    assert fuse[fuse.index("--raw") + 1] == str(tmp_path / "out" / "raw_t.bin")
+    assert fuse[fuse.index("--width") + 1] == "2"
+    assert fuse[-2:] == ["--elf", "x.elf"]
+
+
+def test_raw_in_skips_the_grab(monkeypatch, tmp_path, fake_cortrace):
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        calls.append([str(c) for c in cmd])
+        return types.SimpleNamespace(returncode=3)
+
+    monkeypatch.setattr(ic.subprocess, "run", fake_run)
+    rc = ic.main(
+        ["--raw-in", "r.bin", "--cortrace-dir", fake_cortrace]
+        + ["--out-dir", str(tmp_path)]
+    )
+    assert rc == 3  # the fuse exit code is propagated
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("failing", ["set-width", "stream_grab"])
+def test_grab_failures_abort(monkeypatch, tmp_path, fake_cortrace, failing):
+    def fake_run(cmd, **_kw):
+        bad = any(failing in str(c) for c in cmd)
+        return types.SimpleNamespace(returncode=1 if bad else 0)
+
+    monkeypatch.setattr(ic.subprocess, "run", fake_run)
+    with pytest.raises(SystemExit) as e:
+        ic.main(
+            ["--iface", "e", "--cortrace-dir", fake_cortrace]
+            + ["--out-dir", str(tmp_path)]
+        )
+    assert failing.split("_")[0] in str(e.value)
+
+
+def test_missing_cortrace_checkout_is_reported(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        ic.main(
+            ["--raw-in", "r.bin", "--cortrace-dir", str(tmp_path / "nope")]
+            + ["--out-dir", str(tmp_path)]
+        )
+    assert "cortrace_fuse.py not found" in str(e.value)

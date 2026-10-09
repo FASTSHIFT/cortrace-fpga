@@ -16,7 +16,7 @@ C_DEBUGEN=1 so NuttX won't clear the DWT). Arm that separately and leave it
 attached; this script just captures against the already-armed hardware.
 
 Thread names: heap-allocated TCBs are not in the ELF, so pass --nx-tcbmap with
-a map dumped by nx_tcbmap.py (which needs the probe, so dump it while the DAP
+a map dumped by cortrace's scripts/nx_tcbmap.py (which needs the probe, so dump it while the DAP
 session is momentarily free). Without it, threads show as tcb@0x<addr>.
 
 Usage:
@@ -108,7 +108,11 @@ def main(argv=None):
     ap.add_argument("--sysclk-hz", type=float, default=150_000_000)
     ap.add_argument("--tsgen-hz", type=float, default=None)
     ap.add_argument("--nx-switch-stream", type=int, default=1)
-    ap.add_argument("--nx-tcbmap", default=None, help="TCB->name map (nx_tcbmap.py)")
+    ap.add_argument(
+        "--nx-tcbmap",
+        default=None,
+        help="TCB->name map (cortrace scripts/nx_tcbmap.py)",
+    )
     ap.add_argument(
         "--phase", default=None, help="lock deframe phase, e.g. 1,0 (default: search)"
     )
