@@ -25,6 +25,10 @@ import sys
 
 OOCD_IFACE = "interface/cmsis-dap.cfg"
 OOCD_TARGET = "target/stm32h7x.cfg"
+# When set ("host:port"), read target memory through an already-running OpenOCD
+# telnet server instead of spawning a one-shot session. Needed while a resident
+# session (nxtrace_rtt.sh) owns the probe: a second connect would clear the DWT.
+OOCD_TELNET = None
 
 
 def sym(nm, elf, name):
@@ -52,8 +56,46 @@ def fn_for(addrs, names, addr):
     return names[i] if i >= 0 else "?"
 
 
+def _telnet_cmd(cmd):
+    import socket
+
+    host, _, port = OOCD_TELNET.rpartition(":")
+    s = socket.create_connection((host or "127.0.0.1", int(port)), timeout=5)
+    s.settimeout(3)
+
+    def rd():
+        buf = b""
+        try:
+            while not buf.endswith(b"> "):
+                d = s.recv(65536)
+                if not d:
+                    break
+                buf += d
+        except socket.timeout:
+            pass
+        return buf.decode(errors="replace")
+
+    rd()
+    s.sendall(cmd.encode() + b"\n")
+    out = rd()
+    s.close()
+    return out.replace("\x00", "")
+
+
 def oocd_read_words(addr, count):
-    """Read `count` 32-bit words at `addr` via a one-shot openocd session."""
+    """Read `count` 32-bit words at `addr` (resident telnet or one-shot openocd)."""
+    if OOCD_TELNET:
+        words = {}
+        for line in _telnet_cmd(f"mdw 0x{addr:08x} {count}").splitlines():
+            m = re.match(r"\s*0x([0-9a-fA-F]+):\s+(.+)", line)
+            if m:
+                base = int(m.group(1), 16)
+                for j, tok in enumerate(m.group(2).split()):
+                    try:
+                        words[base + 4 * j] = int(tok, 16)
+                    except ValueError:
+                        pass
+        return words
     cmd = [
         "openocd",
         "-f",
@@ -98,7 +140,15 @@ def main():
     ap.add_argument("--pid-off", default="0x30")
     ap.add_argument("--entry-off", default="0x3c")
     ap.add_argument("--nm", default="arm-none-eabi-nm")
+    ap.add_argument(
+        "--telnet",
+        default=None,
+        metavar="HOST:PORT",
+        help="read via a running OpenOCD telnet server (e.g. 127.0.0.1:4444)",
+    )
     a = ap.parse_args()
+    global OOCD_TELNET
+    OOCD_TELNET = a.telnet
     pid_off = int(a.pid_off, 0)
     entry_off = int(a.entry_off, 0)
 
