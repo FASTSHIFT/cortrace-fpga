@@ -103,7 +103,8 @@ module tb_ddr_ring_fixed;
         .stream_tready(stream_tready),
         .stream_seq(stream_seq), .stream_rtx(stream_rtx),
         .rd_ptr_words(rd_ptr_words), .words_drained(words_drained),
-        .ring_overrun(ring_overrun)
+        .ring_overrun(ring_overrun),
+        .clr_overrun(1'b0)
     );
 
     // ================= REAL vendor ctrl + arbiter (same as tb_la_ddr_ring) =

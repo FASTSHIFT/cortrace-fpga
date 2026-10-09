@@ -88,7 +88,8 @@ module la_ddr_ring_streamer #(
     // ---- observability ----
     output reg  [28:0] rd_ptr_words,    // current ring read pointer (ui_clk)
     output reg  [31:0] words_drained,   // total 128-bit words drained (monotonic)
-    output reg         ring_overrun     // sticky: writer lapped reader (gap)
+    output reg         ring_overrun,    // sticky: writer lapped reader (gap)
+    input  wire        clr_overrun      // 1-cyc pulse (ui_clk): re-arm ring_overrun
 );
     localparam integer PKT_APP = PKT_WORDS * 8;  // app-addr units per packet
     // ring capacity in 128-bit words (RING_WORDS is app-addr units, +8/word)
@@ -283,6 +284,10 @@ module la_ddr_ring_streamer #(
             // ---- overrun watchdog (independent of FSM) ----
             // Absolute backlog exceeding ring capacity => writer overwrote
             // history the streamer had not yet drained: honest coverage gap.
+            // clr_overrun re-arms the flag (host-requested); a lap that is
+            // still happening wins and sets it again straight away.
+            if (clr_overrun)
+                ring_overrun <= 1'b0;
             if (overrun_now)
                 ring_overrun <= 1'b1;
         end

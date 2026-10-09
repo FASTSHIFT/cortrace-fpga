@@ -309,6 +309,13 @@ module trace_ddr_stream_top #(
     wire [31:0] words_drained;
     wire        ring_overrun;
     wire        nack_busy, nack_fail;
+    // CSR 0x10 (clk125) -> one-cycle pulse in ui_clk that re-arms ring_overrun.
+    // dbg_clr_125 is a single clk125 pulse, so carry it as a toggle.
+    reg         clr_tog_125 = 0;
+    always @(posedge clk125) if (dbg_clr_125) clr_tog_125 <= ~clr_tog_125;
+    reg  [2:0]  clr_sync_ui = 0;
+    always @(posedge ui_clk) clr_sync_ui <= {clr_sync_ui[1:0], clr_tog_125};
+    wire        clr_overrun_ui = clr_sync_ui[2] ^ clr_sync_ui[1];
 
     la_ddr_ring_streamer #(
         .LENGTH   (LENGTH),
@@ -342,7 +349,8 @@ module trace_ddr_stream_top #(
         .stream_rtx     (stream_rtx),
         .rd_ptr_words   (rd_ptr_words),
         .words_drained  (words_drained),
-        .ring_overrun   (ring_overrun)
+        .ring_overrun   (ring_overrun),
+        .clr_overrun    (clr_overrun_ui)
     );
 
     // ============ Packetiser (clk125) — [4B BE seq][PAYLOAD trace] ============
@@ -464,6 +472,8 @@ module trace_ddr_stream_top #(
         nack_fail_125 <= snap_nack_fail;
     end
 
+    reg overrun_125_d = 0;
+    always @(posedge clk125) overrun_125_d <= overrun_125;
     // ============ dbg_regfile (existing, clk125) ============
     wire [15:0] ext_addr;
     wire [7:0]  dbg_rdata;
@@ -473,7 +483,10 @@ module trace_ddr_stream_top #(
     wire        dbg_tx_fifo_ovf, dbg_rx_fifo_ovf, dbg_rx_bad_frame;
     dbg_regfile u_dbg (
         .clk(clk125), .rst(sys_rst), .clr(dbg_clr_125),
-        .e_no_traceclk(1'b0), .e_mmcm_unlock(1'b0), .e_cap_overflow(overrun_125),
+        // ring_overrun is a sticky level; report only its rising edge, so a
+        // clear followed by a new lap is seen as a new error.
+        .e_no_traceclk(1'b0), .e_mmcm_unlock(1'b0),
+        .e_cap_overflow(overrun_125 & ~overrun_125_d),
         .e_selftx_stuck(dbg_selftx_stuck), .e_rx_bad_frame(dbg_rx_bad_frame),
         .e_tx_fifo_ovf(dbg_tx_fifo_ovf), .e_rx_fifo_ovf(dbg_rx_fifo_ovf),
         .sys_mmcm_locked(mmcm_sys_locked),
